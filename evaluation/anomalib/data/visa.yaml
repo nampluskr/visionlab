@@ -1,0 +1,16 @@
+# evaluation/anomalib/data/visa.yaml: VisA datamodule
+
+data:
+  class_path: local_data.LocalVisa
+  init_args:
+    root: D:/datasets/visa
+    # Work copy for anomalib's VisA split, kept outside the original (D-17).
+    split_root: D:/datasets/visa_anomalib/visa_pytorch
+    category: candle
+    train_batch_size: 8
+    eval_batch_size: 8
+    num_workers: 0
+    val_split_mode: from_test
+    val_split_ratio: 0.4
+    # Same value as seed_everything in default.yaml.
+    seed: 42

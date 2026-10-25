@@ -1,0 +1,18 @@
+# evaluation/anomalib/default.yaml: default seed, output root and trainer settings (anomalib CLI config format)
+
+# Epochs follow defectvad-refactor configs (base 10 epochs). Models with a different
+# budget override it in models/<name>.yaml. Provisional: cfa, cflow, csflow, draem, dsr,
+# ganomaly, supersimplenet and uflow use the base value without a model-specific reason.
+# Models whose trainer_arguments pin max_epochs (dfkde, dfm, padim, patchcore, winclip: 1,
+# fre: 220) ignore this value in anomalib_run.py.
+seed_everything: 42
+default_root_dir: D:/projects/visionlab/outputs/anomalib
+
+trainer:
+  max_epochs: 10
+  devices: 1
+  # "warn": deterministic where available; cumsum_cuda_kernel (metrics) has no
+  # deterministic implementation and only warns.
+  deterministic: warn
+  # anomalib's Engine uses no logger by default; true makes Lightning log into each run folder.
+  logger: true

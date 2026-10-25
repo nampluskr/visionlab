@@ -1,0 +1,16 @@
+# evaluation/anomalib/models/dfm.yaml: dfm model and budget
+
+model:
+  class_path: anomalib.models.Dfm
+  init_args:
+    backbone: resnet50
+    layer: layer3
+    pre_trained: true
+    pooling_kernel_size: 4
+    pca_level: 0.97
+    score_type: fre
+    visualizer: false
+
+# anomalib pins max_epochs=1 for this model; the pinned value overrides the trainer value.
+trainer:
+  max_epochs: 1

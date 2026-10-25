@@ -1,0 +1,14 @@
+# evaluation/anomalib/models/fastflow.yaml: fastflow model and budget
+
+model:
+  class_path: anomalib.models.Fastflow
+  init_args:
+    backbone: resnet18
+    pre_trained: true
+    flow_steps: 8
+    conv3x3_only: false
+    hidden_ratio: 1.0
+    visualizer: false
+
+trainer:
+  max_epochs: 100

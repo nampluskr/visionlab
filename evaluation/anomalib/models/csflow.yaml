@@ -1,0 +1,11 @@
+# evaluation/anomalib/models/csflow.yaml: csflow model
+
+model:
+  class_path: local_models.LocalCsflow
+  init_args:
+    weights_file: D:/backbones/efficientnet_b5_lukemelas-1a07897c.pth
+    cross_conv_hidden_channels: 1024
+    n_coupling_blocks: 4
+    clamp: 3
+    num_channels: 3
+    visualizer: false

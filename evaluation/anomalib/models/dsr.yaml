@@ -1,0 +1,19 @@
+# evaluation/anomalib/models/dsr.yaml: dsr model
+
+model:
+  class_path: local_models.LocalDsr
+  init_args:
+    weights_file: D:/backbones/vq_model_pretrained_128_4096.pckl
+    latent_anomaly_strength: 0.2
+    upsampling_train_ratio: 0.7
+    visualizer: false
+    # anomalib 2.0.0 never calls this model's configure_transforms (resize only, inputs stay in [0, 1])
+    # and adds ImageNet normalization, so the resize-only pre-processor is set here.
+    pre_processor:
+      class_path: anomalib.pre_processing.PreProcessor
+      init_args:
+        transform:
+          class_path: torchvision.transforms.v2.Resize
+          init_args:
+            size: [256, 256]
+            antialias: true

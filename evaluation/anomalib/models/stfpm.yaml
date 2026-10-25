@@ -1,0 +1,8 @@
+# evaluation/anomalib/models/stfpm.yaml: stfpm model
+
+model:
+  class_path: anomalib.models.Stfpm
+  init_args:
+    backbone: resnet18
+    layers: [layer1, layer2, layer3]
+    visualizer: false

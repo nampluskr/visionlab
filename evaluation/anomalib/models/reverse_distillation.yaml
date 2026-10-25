@@ -1,0 +1,12 @@
+# evaluation/anomalib/models/reverse_distillation.yaml: reverse_distillation model and budget
+
+model:
+  class_path: anomalib.models.ReverseDistillation
+  init_args:
+    backbone: wide_resnet50_2
+    layers: [layer1, layer2, layer3]
+    pre_trained: true
+    visualizer: false
+
+trainer:
+  max_epochs: 200

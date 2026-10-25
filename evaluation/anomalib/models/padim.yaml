@@ -1,0 +1,13 @@
+# evaluation/anomalib/models/padim.yaml: padim model and budget
+
+model:
+  class_path: anomalib.models.Padim
+  init_args:
+    backbone: resnet18
+    layers: [layer1, layer2, layer3]
+    pre_trained: true
+    visualizer: false
+
+# anomalib pins max_epochs=1 for this model; the pinned value overrides the trainer value.
+trainer:
+  max_epochs: 1

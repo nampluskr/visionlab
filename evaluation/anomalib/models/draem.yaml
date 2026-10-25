@@ -1,0 +1,20 @@
+# evaluation/anomalib/models/draem.yaml: draem model
+
+model:
+  class_path: anomalib.models.Draem
+  init_args:
+    anomaly_source_path: D:/datasets/dtd/images
+    enable_sspcab: false
+    sspcab_lambda: 0.1
+    beta: [0.1, 1.0]
+    visualizer: false
+    # anomalib 2.0.0 never calls this model's configure_transforms (resize only, inputs stay in [0, 1])
+    # and adds ImageNet normalization, so the resize-only pre-processor is set here.
+    pre_processor:
+      class_path: anomalib.pre_processing.PreProcessor
+      init_args:
+        transform:
+          class_path: torchvision.transforms.v2.Resize
+          init_args:
+            size: [256, 256]
+            antialias: true

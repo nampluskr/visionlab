@@ -1,0 +1,7 @@
+# Local backbone weights on this machine (DECISIONS D-12). Keys are timm model names;
+# evaluation/anomalib/local_setup.py makes timm load these files for them.
+
+[backbones]
+resnet18 = "D:/backbones/resnet18-f37072fd.pth"
+resnet50 = "D:/backbones/resnet50-0676ba61.pth"
+wide_resnet50_2 = "D:/backbones/wide_resnet50_2-95faca4d.pth"

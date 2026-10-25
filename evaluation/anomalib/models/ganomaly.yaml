@@ -1,0 +1,23 @@
+# evaluation/anomalib/models/ganomaly.yaml: ganomaly model and budget
+
+model:
+  class_path: anomalib.models.Ganomaly
+  init_args:
+    batch_size: 32
+    n_features: 64
+    latent_vec_size: 100
+    extra_layers: 0
+    add_final_conv_layer: true
+    wadv: 1
+    wcon: 50
+    wenc: 1
+    lr: 0.0002
+    beta1: 0.5
+    beta2: 0.999
+    visualizer: false
+
+# Matches the ganomaly batch_size constructor default. Pass --config data/<name>.yaml before this file.
+data:
+  init_args:
+    train_batch_size: 32
+    eval_batch_size: 32

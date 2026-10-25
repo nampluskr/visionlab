@@ -1,0 +1,10 @@
+# evaluation/anomalib/models/supersimplenet.yaml: supersimplenet model
+
+model:
+  class_path: anomalib.models.Supersimplenet
+  init_args:
+    perlin_threshold: 0.2
+    backbone: wide_resnet50_2
+    layers: [layer2, layer3]
+    supervised: false
+    visualizer: false

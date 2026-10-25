@@ -1,0 +1,16 @@
+# evaluation/anomalib/models/cfa.yaml: cfa model and budget
+
+model:
+  class_path: local_models.LocalCfa
+  init_args:
+    backbone: wide_resnet50_2
+    weights_file: D:/backbones/wide_resnet50_2-95faca4d.pth
+    gamma_c: 1
+    gamma_d: 1
+    num_nearest_neighbors: 3
+    num_hard_negative_features: 3
+    radius: 0.00001
+    visualizer: false
+
+trainer:
+  max_epochs: 30

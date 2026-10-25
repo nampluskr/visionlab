@@ -1,0 +1,14 @@
+# evaluation/anomalib/data/mvtec.yaml: MVTec AD datamodule
+
+data:
+  class_path: local_data.LocalMVTecAD
+  init_args:
+    root: D:/datasets/mvtec
+    category: bottle
+    train_batch_size: 8
+    eval_batch_size: 8
+    num_workers: 0
+    val_split_mode: from_test
+    val_split_ratio: 0.4
+    # Same value as seed_everything in default.yaml.
+    seed: 42
