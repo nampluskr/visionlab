@@ -1,13 +1,11 @@
-# evaluation/anomalib/models/dfkde.yaml: dfkde model and budget
+# evaluation/anomalib/models/03_padim.yaml: padim model and budget
 
 model:
-  class_path: anomalib.models.Dfkde
+  class_path: anomalib.models.Padim
   init_args:
     backbone: resnet18
-    layers: [layer4]
+    layers: [layer1, layer2, layer3]
     pre_trained: true
-    n_pca_components: 16
-    max_training_points: 40000
     visualizer: false
 
 # anomalib pins max_epochs=1 for this model; the pinned value overrides the trainer value.

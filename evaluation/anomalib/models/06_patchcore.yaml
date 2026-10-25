@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/patchcore.yaml: patchcore model and budget
+# evaluation/anomalib/models/06_patchcore.yaml: patchcore model and budget
 
 model:
   class_path: anomalib.models.Patchcore

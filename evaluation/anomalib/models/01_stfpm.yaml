@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/stfpm.yaml: stfpm model
+# evaluation/anomalib/models/01_stfpm.yaml: stfpm model
 
 model:
   class_path: anomalib.models.Stfpm

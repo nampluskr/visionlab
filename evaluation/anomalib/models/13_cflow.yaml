@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/cflow.yaml: cflow model
+# evaluation/anomalib/models/13_cflow.yaml: cflow model
 
 model:
   class_path: anomalib.models.Cflow

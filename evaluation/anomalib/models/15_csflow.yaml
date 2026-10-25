@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/csflow.yaml: csflow model
+# evaluation/anomalib/models/15_csflow.yaml: csflow model
 
 model:
   class_path: local_models.LocalCsflow

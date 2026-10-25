@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/draem.yaml: draem model
+# evaluation/anomalib/models/11_draem.yaml: draem model
 
 model:
   class_path: anomalib.models.Draem

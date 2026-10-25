@@ -1,7 +1,7 @@
 # evaluation/anomalib/default.yaml: default seed, output root and trainer settings (anomalib CLI config format)
 
 # Epochs follow defectvad-refactor configs (base 10 epochs). Models with a different
-# budget override it in models/<name>.yaml. Provisional: cfa, cflow, csflow, draem, dsr,
+# budget override it in models/NN_<name>.yaml. Provisional: cfa, cflow, csflow, draem, dsr,
 # ganomaly, supersimplenet and uflow use the base value without a model-specific reason.
 # Models whose trainer_arguments pin max_epochs (dfkde, dfm, padim, patchcore, winclip: 1,
 # fre: 220) ignore this value in anomalib_run.py.

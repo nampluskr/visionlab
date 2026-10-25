@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/reverse_distillation.yaml: reverse_distillation model and budget
+# evaluation/anomalib/models/07_reverse_distillation.yaml: reverse_distillation model and budget
 
 model:
   class_path: anomalib.models.ReverseDistillation

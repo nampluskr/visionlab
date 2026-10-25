@@ -4,7 +4,7 @@ Phase 0에서 모든 모델이 공유하는 데이터셋을 구현하고 anomali
 
 - **평가 category**: MVTec `bottle`, VisA `candle`.
 - **산출 위치**: 실행 산출물은 `outputs/`, 결과는 Phase마다 `docs/results/NN-<kebab-case>.md`(규칙과 산출물 위치는 `docs/results/README.md`).
-- **레퍼런스 실행**: `evaluation/anomalib/anomalib_run.py`(`AnomalibCLI`)와 공유 yaml(`default.yaml`, `data/*.yaml`, `models/<name>.yaml`).
+- **레퍼런스 실행**: `evaluation/anomalib/anomalib_run.py`(`AnomalibCLI`)와 공유 yaml(`default.yaml`, `data/*.yaml`, `models/NN_<name>.yaml`).
 
 각 모델 Phase 안에서 INTENT의 검증 세 단계를 다음 순서로 수행한다.
 
@@ -25,11 +25,35 @@ Phase 0에서 모든 모델이 공유하는 데이터셋을 구현하고 anomali
 | 5 | 이식 결과 실행(native Lightning 학습·평가, 순수 PyTorch 추론) | Claude가 명령을 보내고 agy가 실행 |
 | 6 | 수치 판정·기록 | Claude. 기준 미달이면 원인을 진단해 3으로 돌아간다(최대 3회) |
 | 7 | 보고, Phase 종료 결정 | Claude가 보고하고 사용자가 결정 |
+| 8 | 커밋·푸시 | Claude. 종료가 결정되면 그 Phase의 변경을 커밋하고 `origin`에 푸시 |
+
+## Phase 번호와 파일 이름
+
+Phase 번호는 두 자리이고 구현 순서다. 모델별 파일이 쌓이는 곳(`docs/results/`, `tests/`, `evaluation/anomalib/models/`)은 이 번호를 붙여 `ls`만으로 순서와 진행 상태를 보이게 한다. 번호와 모델의 대응은 아래 표가 유일한 원본이며, 순서를 바꾸면 번호가 붙은 파일 이름을 함께 바꾼다. `src/`의 모델 패키지와 `outputs/`에는 번호를 붙이지 않는다(D-15).
+
+| NN | 모델 폴더 이름 | NN | 모델 폴더 이름 |
+| --- | --- | --- | --- |
+| 00 | dataset | 10 | supersimplenet |
+| 01 | stfpm | 11 | draem |
+| 02 | efficient_ad | 12 | fastflow |
+| 03 | padim | 13 | cflow |
+| 04 | dfm | 14 | uflow |
+| 05 | dfkde | 15 | csflow |
+| 06 | patchcore | 16 | ganomaly |
+| 07 | reverse_distillation | 17 | dsr |
+| 08 | cfa | 18 | winclip |
+| 09 | fre | | |
+
+| 위치 | 이름 |
+| --- | --- |
+| `docs/results/` | `NN-<kebab-case>.md` (예: `02-efficient-ad.md`) |
+| `evaluation/anomalib/models/` | `NN_<모델 폴더 이름>.yaml` (예: `02_efficient_ad.yaml`) |
+| `tests/` | `NN_<모델 폴더 이름>/test_*.py`. 여러 Phase에 걸친 테스트는 `tests/common/` |
 
 ## Phase 0. 데이터셋
 
 - **목적**: 모든 모델이 공유하는 MVTec·VisA 데이터셋을 visionlab에서 새로 구현하고, 모델 비교 전에 anomalib 데이터와 같은지 대조한다(D-13). anomalib 데이터 코드는 복사하지 않는다(D-18의 복사 대상은 models뿐이다).
-- **만드는 것**: `data/common/split.py`, `data/mvtec/`·`data/visa/`의 `dataset.py`(`MVTecDataset`, `VisADataset`)와 `lightning_data.py`(`MVTecLitData`, `VisALitData`), `common/batch.py`(Batch, InferenceBatch), 대조 스크립트 `evaluation/anomalib/00_compare_data.py`, `tests/test_data.py`.
+- **만드는 것**: `data/common/split.py`, `data/mvtec/`·`data/visa/`의 `dataset.py`(`MVTecDataset`, `VisADataset`)와 `lightning_data.py`(`MVTecLitData`, `VisALitData`), `common/batch.py`(Batch, InferenceBatch), 대조 스크립트 `evaluation/anomalib/00_compare_data.py`, `tests/00_dataset/test_data.py`.
 - **대응 요구 ID**: FR-1, FR-2, FR-3, FR-17, NFR-1, NFR-3
 - **진행 순서**: Claude가 지시하고 codex가 구현한다. Claude가 적대적으로 검증해 수정을 요청한다(최대 3회). agy가 대조 스크립트와 테스트를 실행하고, Claude가 판정·기록한다.
 - **완료 조건**:
@@ -43,7 +67,7 @@ Phase 1~18의 각 모델 Phase에 적용한다. 각 Phase는 모델 하나를 �
 
 - **대응 요구 ID**: FR-4, FR-5, FR-6, FR-18, FR-19, FR-20, FR-21, NFR-3, NFR-4, NFR-5와 모델별 요구.
 - **완료 조건**:
-  - 레퍼런스: `anomalib_run.py train`과 `models/<name>.yaml`로 category별 Image·Pixel AUROC와 실제 적용된 학습 예산을 그 Phase의 결과 파일에 기록한다(FR-21). 같은 설정으로 2회 실행한 run 간 차이도 기록한다.
+  - 레퍼런스: `anomalib_run.py train`과 `models/NN_<name>.yaml`로 category별 Image·Pixel AUROC와 실제 적용된 학습 예산을 그 Phase의 결과 파일에 기록한다(FR-21). 같은 설정으로 2회 실행한 run 간 차이도 기록한다.
   - 레퍼런스 학습 예산은 공유 yaml을 따른다: 기본 `max_epochs=10`, `val_split_mode="from_test"`, `val_split_ratio=0.4`, `seed=42`(데이터 분할·`seed_everything`), batch 8/8(모델 yaml의 override 우선), `num_workers=0`, `devices=1`, `deterministic="warn"`, `CUBLAS_WORKSPACE_CONFIG=:4096:8`. 모델이 고정하는 `trainer_arguments`가 우선한다. 이식 결과도 같은 예산을 쓴다.
   - 순수 모델의 평가 출력 shape(FR-4)과 생성자 인자(FR-6)가 판정 방법을 통과한다.
   - 같은 state·입력에서 순수 모델의 raw 출력이 anomalib 원본과 일치한다(FR-5). 허용 오차는 Phase 시작 전에 확정한다.

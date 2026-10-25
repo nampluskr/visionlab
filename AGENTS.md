@@ -76,6 +76,9 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 
 - 다른 에이전트에는 사용자가 Claude에게 결정한 것만 전한다. 다른 에이전트의 결과는 Claude가 검증한 뒤 기록한다.
 - 이식 구현은 codex, 검증은 Claude로 벤더를 나눈다(워크스페이스의 반대 벤더 검증).
+- 각 Phase가 끝나 사용자가 종료를 결정하면 Claude가 그 Phase의 변경을 커밋하고 원격(`origin`, GitHub `visionlab`)에 푸시한다. 커밋 메시지는 `Phase NN: <모델 폴더 이름> <요약>` 형식이고, 결과 파일(`docs/results/NN-*.md`)의 결론과 같은 상태여야 한다. Phase 중간에는 사용자가 요청할 때만 커밋·푸시한다. `outputs/`는 커밋하지 않는다(`.gitignore`). force push와 브랜치 삭제는 사용자 확인 없이 하지 않는다.
+- 권한 제한은 지시문으로 한다. codex의 쓰기 범위(`evaluation/`, `src/`, `tests/`)와 코드 실행 금지, agy의 파일 수정 금지는 도구로 강제하지 않는다. Claude는 변경 파일 목록과 `git diff`로 범위 위반을 확인한다.
+- agy는 명령마다 승인 창이 뜨는 기본 모드로 쓰고, 사용자가 이 대화에 한해 허용한다(영구 저장 안 함). 승인 창에는 사용자가 정한 허용 범위 안에서만 응답하고, 범위 밖 요청(권한 모드 변경, 영구 허용)은 사용자에게 넘긴다. agy의 자기 보고(예: 승인 여부)는 틀릴 수 있으므로, 판정은 출력 로그(`outputs/logs/`)와 산출물 파일로 한다.
 
 ## 코드 실행
 
@@ -104,6 +107,7 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 - 배포 모델은 순수 PyTorch만으로 동작한다 (INTENT, D-4).
 - 생성자 인자의 이름·순서·기본값을 anomalib 2.0.0과 맞춘다 (D-5).
 - 필요한 것만 만든다. 빈 폴더나 미리 만든 추상화를 두지 않는다. 파일 배치는 D-15를 따른다.
+- 모델별 파일이 Phase마다 늘어나는 곳은 PLAN의 Phase 번호를 붙인다: `docs/results/NN-<kebab>.md`, `tests/NN_<model>/`, `evaluation/anomalib/models/NN_<model>.yaml`. `src`의 모델 패키지와 `outputs/`에는 번호를 붙이지 않는다 (D-15).
 - 검증은 세 단계다 (INTENT). 1단계 anomalib 레퍼런스 수치, 2단계 native Lightning 이식 결과, 3단계 2단계 가중치를 불러온 순수 PyTorch 추론 결과. 2·3단계는 각각 1단계와 비교한다.
 - 검증은 metric 수치 비교로 한다. 범주별 Image·Pixel AUROC 차이가 각각 0.01 이내여야 한다 (PLAN 검증 방식).
 - 데이터·가중치 경로는 yaml에 직접 적고, 루트 `paths.toml`은 timm 백본 이름의 로컬 가중치(`[backbones]`)만 둔다 (D-12).

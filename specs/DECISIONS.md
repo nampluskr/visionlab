@@ -101,7 +101,7 @@ visionlab/                                      # project root
 ├── evaluation/                                 # evaluation code (reference runs, comparisons, ported model evaluation)
 │   ├── anomalib/                               # imports anomalib
 │   │   ├── data/                               # shared data yaml (mvtec.yaml, visa.yaml)
-│   │   ├── models/                             # shared model yaml (<name>.yaml), per-Phase reference
+│   │   ├── models/                             # shared model yaml (NN_<name>.yaml), per-Phase reference
 │   │   ├── 00_compare_data.py                  # Phase 0, visionlab data vs anomalib data (FR-17, D-13)
 │   │   ├── anomalib_run.py                     # AnomalibCLI entry point, reference runs
 │   │   ├── compare_outputs.py                  # raw output vs anomalib, --model (FR-5, diagnosis)
@@ -115,15 +115,19 @@ visionlab/                                      # project root
 ├── notebooks/                                  # Jupyter notebooks
 ├── outputs/                                    # run outputs, excluded from git
 ├── specs/                                      # INTENT, DECISIONS, SPEC, PLAN
-├── tests/                                      # visionlab test scripts (FR·NFR checks)
-│   ├── test_data.py                            # FR-1~3, Phase 0
-│   ├── test_stfpm_model.py                     # FR-4, FR-16, NFR-5
-│   ├── test_components.py                      # FR-7~11
-│   ├── test_stfpm_lightning.py                 # FR-6, FR-12
-│   ├── test_cli.py                             # FR-13
-│   ├── test_predictor.py                       # FR-14
-│   ├── test_dependency.py                      # NFR-1, NFR-2
-│   └── test_efficient_ad.py                    # FR-15
+├── tests/                                      # visionlab test scripts (FR·NFR checks), run directly
+│   ├── 00_dataset/
+│   │   └── test_data.py                        # FR-1~3
+│   ├── 01_stfpm/
+│   │   ├── test_components.py                  # FR-7~11, common parts first built in Phase 1
+│   │   ├── test_lightning.py                   # FR-6, FR-12
+│   │   ├── test_model.py                       # FR-4, FR-16, NFR-5
+│   │   └── test_predictor.py                   # FR-14
+│   ├── 02_efficient_ad/
+│   │   └── test_efficient_ad.py                # FR-15
+│   └── common/                                 # tests that span Phases
+│       ├── test_cli.py                         # FR-13
+│       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
 └── src/
     └── visionlab/
         ├── anomaly_detection/
@@ -183,7 +187,7 @@ visionlab/                                      # project root
 패키지 `__init__.py`는 Lightning 연결 파일을 자동 import하지 않는다. 원본에서 복사한 모델 패키지의 `__init__.py`도 예외로 고친다(D-18). 모델에 필요 없는 `loss.py`·`metric.py`를 관례만으로 만들지 않는다.
 
 - **근거**: D-1·D-7·D-11에 흩어진 배치를 한 트리로 묶어, Phase마다 무엇을 어디에 만드는지 PLAN이 참조할 수 있게 한다. 파일 위치만으로 Lightning·anomalib 의존 여부가 드러나게 한다.
-- **배제한 대안**: `models/common`(D-11). 프로젝트 루트 바로 아래의 Python 파일(평가 스크립트는 `evaluation/`에 둔다). 모델마다 `NN_train_<model>.py`처럼 Phase별 실행 스크립트를 따로 두는 방식(18개 모델이면 36개가 되고 같은 절차가 반복된다). 평가 코드를 `examples/`에 두는 방식(예제와 정식 평가 자료가 섞인다). 평가 코드를 `tests/`에 두는 방식(장시간 학습과 단위 테스트가 섞이고 tests의 anomalib 미사용 원칙과 충돌한다). 모든 task 폴더와 하위 폴더를 미리 생성. 순수 파일과 Lightning 연결을 한 파일에 섞는 방식. `pyproject.toml`·`pip install -e .` 개발 설치. 실행 전 `PYTHONPATH` 환경변수 지정. `-m` 모듈 실행.
+- **배제한 대안**: `models/common`(D-11). 프로젝트 루트 바로 아래의 Python 파일(평가 스크립트는 `evaluation/`에 둔다). 모델마다 `NN_train_<model>.py`처럼 Phase별 실행 스크립트를 따로 두는 방식(18개 모델이면 36개가 되고 같은 절차가 반복된다). 평가 코드를 `examples/`에 두는 방식(예제와 정식 평가 자료가 섞인다). 평가 코드를 `tests/`에 두는 방식(장시간 학습과 단위 테스트가 섞이고 tests의 anomalib 미사용 원칙과 충돌한다). 테스트 파일 이름에 Phase 번호를 접두사로 붙이는 방식(`test_01_stfpm_model.py`, 한 폴더에 18 Phase x 여러 파일이 섞인다). `src`의 모델 패키지에 번호를 붙이는 방식(import 이름이 식별자여야 하고 구현 순서가 바뀌면 코드 이름이 바뀐다). 모든 task 폴더와 하위 폴더를 미리 생성. 순수 파일과 Lightning 연결을 한 파일에 섞는 방식. `pyproject.toml`·`pip install -e .` 개발 설치. 실행 전 `PYTHONPATH` 환경변수 지정. `-m` 모듈 실행.
 `outputs/`는 git에서 제외한다(`.gitignore`). anomalib을 import하는 비교·테스트 코드는 `evaluation/anomalib/`에만 두고 `src/visionlab`에서 참조하지 않는다(D-3·INTENT). `evaluation/anomalib/`에는 레퍼런스 실행 진입점(`anomalib_run.py`는 `AnomalibCLI`), 공유 yaml, 공통 설정 `local_setup.py`(오프라인 설정, timm 이름의 로컬 가중치 연결, Windows 실행 폴더 처리), `local_data.py`의 `LocalMVTecAD`·`LocalVisa`(D-17), `local_models.py`의 로컬 자산 모델, visionlab 데이터·출력을 anomalib과 대조하는 비교 스크립트(FR-17, FR-5)를 둔다.
 
 패키징 설정(`pyproject.toml` 등)과 `pip install -e .` 개발 설치는 사용하지 않는다. 테스트와 실행은 사용자가 PowerShell에서 WinPython의 전체 경로로 직접 실행한다.
@@ -194,7 +198,7 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe <file>.py --<option>
 
 `evaluation/`·`tests/`의 스크립트는 첫머리에서 `<root>/src`를 `sys.path`에 추가한 뒤 `visionlab`을 import한다. visionlab 자체 테스트 스크립트는 루트 `tests/`에 둔다. `tests/`는 anomalib을 import하지 않는다.
 
-스크립트 이름 규칙은 다음과 같다. Phase에 묶인 일회성 스크립트(데이터 대조 등)는 `NN_<단계>.py`이고 `NN`은 PLAN의 Phase 번호다. 모델 Phase 전체에서 쓰는 공용 진입점은 번호 없이 `anomalib_run.py`, `compare_outputs.py`, `train.py`, `predict.py`로 두고 모델은 yaml 또는 `--model` 인자로 고른다. 공용 모듈은 `_` 접두사를 붙이되, `evaluation/anomalib/`의 공용 모듈은 yaml의 `class_path`로 import되므로 `local_` 접두사를 쓴다. 테스트는 `tests/test_<대상>.py`다. anomalib을 import하는 스크립트만 `evaluation/anomalib/`에 두고, 나머지 평가 스크립트는 `evaluation/visionlab/`에 둔다. CLI는 `-m` 실행 대신 `evaluation/visionlab/train.py`가 `sys.path`를 설정한 뒤 `trainers/lightning_cli.py`의 `LitCLI`를 호출한다. 실행 결과는 `outputs/`에 저장한다.
+스크립트 이름 규칙은 다음과 같다. Phase에 묶인 일회성 스크립트(데이터 대조 등)는 `NN_<단계>.py`이고 `NN`은 PLAN의 Phase 번호다. 모델 Phase 전체에서 쓰는 공용 진입점은 번호 없이 `anomalib_run.py`, `compare_outputs.py`, `train.py`, `predict.py`로 두고 모델은 yaml 또는 `--model` 인자로 고른다. 공용 모듈은 `_` 접두사를 붙이되, `evaluation/anomalib/`의 공용 모듈은 yaml의 `class_path`로 import되므로 `local_` 접두사를 쓴다. 모델별 파일이 Phase마다 늘어나는 곳은 Phase 번호(두 자리)를 붙인다. `tests/`는 `tests/NN_<모델 폴더 이름>/test_*.py`이고 여러 Phase에 걸친 테스트는 `tests/common/`에 둔다. `evaluation/anomalib/models/`는 `NN_<모델 폴더 이름>.yaml`이다. 번호는 PLAN의 대응 표가 유일한 원본이다. `src/visionlab/.../models/<model>/`(Python 패키지 이름)과 `outputs/`(anomalib 출력 규칙)에는 번호를 붙이지 않는다. `tests/`는 `evaluation/`과 달리 anomalib을 import하지 않는다. anomalib을 import하는 스크립트만 `evaluation/anomalib/`에 두고, 나머지 평가 스크립트는 `evaluation/visionlab/`에 둔다. CLI는 `-m` 실행 대신 `evaluation/visionlab/train.py`가 `sys.path`를 설정한 뒤 `trainers/lightning_cli.py`의 `LitCLI`를 호출한다. 실행 결과는 `outputs/`에 저장한다.
 
 ## D-16. Phase 순서: 모델별 레퍼런스 확보, 이식, 비교
 

@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/uflow.yaml: uflow model
+# evaluation/anomalib/models/14_uflow.yaml: uflow model
 
 model:
   class_path: anomalib.models.Uflow

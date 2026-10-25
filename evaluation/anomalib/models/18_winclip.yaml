@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/winclip.yaml: winclip model and budget
+# evaluation/anomalib/models/18_winclip.yaml: winclip model and budget
 
 model:
   class_path: local_models.LocalWinClip

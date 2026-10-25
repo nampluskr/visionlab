@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/supersimplenet.yaml: supersimplenet model
+# evaluation/anomalib/models/10_supersimplenet.yaml: supersimplenet model
 
 model:
   class_path: anomalib.models.Supersimplenet

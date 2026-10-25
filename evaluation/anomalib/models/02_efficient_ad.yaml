@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/efficient_ad.yaml: efficient_ad model and budget
+# evaluation/anomalib/models/02_efficient_ad.yaml: efficient_ad model and budget
 
 model:
   class_path: local_models.LocalEfficientAd

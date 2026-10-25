@@ -15,6 +15,7 @@ PLAN의 Phase 하나(모델 하나)를 진행하는 절차다. 역할과 권한�
 | 5 | 이식 결과 실행 | Claude가 명령을 보내고 agy가 실행 | 콘솔 출력, run 폴더 |
 | 6 | 수치 판정·기록 | Claude (기준 미달이면 3으로, 최대 3회) | 결과 파일의 5절 |
 | 7 | 보고 | Claude가 보고하고 사용자가 종료 결정 | |
+| 8 | 커밋·푸시 | Claude (종료 결정 후) | 커밋, 원격 반영 |
 
 단계 사이에는 파일과 출력만 넘긴다. codex와 agy에는 이전 대화의 해석 대신 원본 소스, `specs/`, 이 문서, 산출물 경로를 준다.
 
@@ -24,7 +25,7 @@ Phase 0은 모델이 아니라 데이터셋을 다룬다. 1절의 순서를 따�
 
 - 레퍼런스 실행(1~2단계) 대신 anomalib 데이터(`LocalMVTecAD`, `LocalVisa`)와의 대조가 기준이다.
 - codex는 데이터셋을 새로 구현한다(원본 복사 아님, D-18). 만들 파일과 완료 조건은 `specs/PLAN.md`의 Phase 0을 따른다.
-- agy는 `evaluation/anomalib/00_compare_data.py`와 `tests/test_data.py`를 실행한다.
+- agy는 `evaluation/anomalib/00_compare_data.py`와 `tests/00_dataset/test_data.py`를 실행한다.
 - Claude는 파일 목록, 라벨, mask, 분할, 최종 입력 텐서의 일치를 판정한다(FR-17).
 
 ## 3. 모델 Phase 시작 준비 (Claude)
@@ -37,15 +38,15 @@ Phase를 시작할 때 Claude가 다음을 준비한다.
 
 ### 4.1 실행 명령 (Claude가 agy에 보냄)
 
-`evaluation\anomalib`에서 category마다 2회 실행한다. 같은 설정의 두 번째 실행은 `v<N+1>` 폴더로 따로 남는다.
+`NN`은 PLAN의 Phase 번호, `<name>`은 모델 폴더 이름이다(예: `01_stfpm`). `evaluation\anomalib`에서 category마다 2회 실행한다. 같은 설정의 두 번째 실행은 `v<N+1>` 폴더로 따로 남는다.
 
 ```powershell
 cd D:\projects\visionlab\evaluation\anomalib
 $py = 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe'
-& $py anomalib_run.py train --config default.yaml --config data/mvtec.yaml --config models/<name>.yaml
-& $py anomalib_run.py train --config default.yaml --config data/mvtec.yaml --config models/<name>.yaml
-& $py anomalib_run.py train --config default.yaml --config data/visa.yaml --config models/<name>.yaml
-& $py anomalib_run.py train --config default.yaml --config data/visa.yaml --config models/<name>.yaml
+& $py anomalib_run.py train --config default.yaml --config data/mvtec.yaml --config models/NN_<name>.yaml
+& $py anomalib_run.py train --config default.yaml --config data/mvtec.yaml --config models/NN_<name>.yaml
+& $py anomalib_run.py train --config default.yaml --config data/visa.yaml --config models/NN_<name>.yaml
+& $py anomalib_run.py train --config default.yaml --config data/visa.yaml --config models/NN_<name>.yaml
 ```
 
 ### 4.2 진단 (Claude)
@@ -78,7 +79,7 @@ Claude는 agy가 돌려준 출력과 run 폴더로 다음을 확인한다.
 읽을 것: specs/INTENT.md, specs/SPEC.md, specs/PLAN.md(Phase N, 공통 양식), specs/DECISIONS.md(D-4, D-5, D-15),
   AGENTS.md(Python 코드 규칙), docs/workflow/model-port.md, docs/results/NN-<kebab-case>.md(1·2절),
   원본 C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\Lib\site-packages\anomalib\models\image\<name>\
-쓸 수 있는 곳: evaluation/, src/, tests/
+쓸 수 있는 곳: evaluation/, src/, tests/ (테스트는 tests/NN_<model>/)
 금지: anomalib import(src/visionlab), 코드 실행, specs/·docs/ 수정, 원본 알고리즘 변경
 만들 것: <Phase N의 파일 목록 (D-15 배치)>
 돌려줄 것: 변경 파일 목록, 원본 파일·함수와의 대응표, 원본과 다르게 구현한 곳과 이유, 미구현 항목
@@ -173,3 +174,7 @@ Claude는 Phase 끝에 사용자에게 다음을 보고한다. 사용자가 Phas
 - 레퍼런스와 이식 결과의 비교 표, 판정
 - 적대적 검증의 회차와 남은 지적
 - 수정 반복 횟수, 미충족 항목과 남은 위험
+
+## 10. 커밋·푸시
+
+사용자가 Phase 종료를 결정하면 Claude가 그 Phase의 변경을 커밋하고 `origin`에 푸시한다. 커밋 메시지는 `Phase NN: <모델 폴더 이름> <요약>` 형식이다. 커밋에는 코드, yaml, 문서(`docs/results/NN-*.md` 포함)를 담고 `outputs/`는 담지 않는다. Phase 중간에는 사용자가 요청할 때만 커밋·푸시하며, force push는 사용자 확인 없이 하지 않는다.

@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/dsr.yaml: dsr model
+# evaluation/anomalib/models/17_dsr.yaml: dsr model
 
 model:
   class_path: local_models.LocalDsr

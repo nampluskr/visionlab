@@ -45,7 +45,7 @@ VisA는 처음 실행할 때 anomalib의 1cls 분할을 `D:\datasets\visa_anomal
 
 `evaluation/anomalib/anomalib_run.py`는 anomalib의 `AnomalibCLI`로 레퍼런스를 얻는 진입점이다. 상수 대신 yaml과 명령행 인자를 받는다.
 
-설정은 `default.yaml`, `data/<name>.yaml`, `models/<name>.yaml`을 `--config`로 차례로 겹쳐 지정하며, 뒤에 준 값이 앞의
+설정은 `default.yaml`, `data/<name>.yaml`, `models/NN_<name>.yaml`을 `--config`로 차례로 겹쳐 지정하며, 뒤에 준 값이 앞의
 값을 덮어쓴다. 데이터와 가중치 경로는 이 yaml에 적혀 있고, 루트 `paths.toml`의 `[backbones]`는 timm이 `resnet18` 같은
 모델 이름을 요청할 때 로컬 가중치 파일을 읽게 하는 데에만 쓴다. 오프라인 설정, 실행 폴더 패치, timm 등록은
 `local_setup.py`를 거친다.
@@ -54,7 +54,7 @@ VisA는 처음 실행할 때 anomalib의 1cls 분할을 `D:\datasets\visa_anomal
 
 ```powershell
 cd evaluation/anomalib
-& $py anomalib_run.py train --config default.yaml --config data/mvtec.yaml --config models/stfpm.yaml
+& $py anomalib_run.py train --config default.yaml --config data/mvtec.yaml --config models/01_stfpm.yaml
 ```
 
 - `train`은 학습 후 테스트를 한다. `fit`은 학습만, `test`는 테스트만 수행한다.
@@ -65,10 +65,10 @@ cd evaluation/anomalib
 - `seed_everything`은 anomalib CLI가 선언만 하고 호출하지 않아 `anomalib_run.py`가 직접 호출한다. `data/*.yaml`의 `seed`는 데이터 분할용이며 `default.yaml`의 값과
   같게 유지한다.
 - 모델 yaml의 backbone은 anomalib 원본과 같은 이름(`resnet18` 등)이다. `local_setup.py`가 timm의 해당 이름을 로컬
-  가중치 로더로 바꾸며, 이때 timm이 덮어쓰기 경고를 낸다. `efficient_ad.yaml`은 `model_size`를 바꾸면 `teacher_file`도
+  가중치 로더로 바꾸며, 이때 timm이 덮어쓰기 경고를 낸다. `02_efficient_ad.yaml`은 `model_size`를 바꾸면 `teacher_file`도
   같이 바꾼다.
 - `default_root_dir`는 yaml 최상위 키만 쓴다. `trainer.default_root_dir`를 직접 지정하지 않는다.
-- `draem.yaml`과 `dsr.yaml`은 정규화 없는 resize 전용 `pre_processor`를 직접 지정한다. anomalib 2.0.0은 두 모델의
+- `11_draem.yaml`과 `17_dsr.yaml`은 정규화 없는 resize 전용 `pre_processor`를 직접 지정한다. anomalib 2.0.0은 두 모델의
   `configure_transforms`를 호출하지 않아 지정하지 않으면 ImageNet 정규화가 적용된다.
 
 ## 폴더 구조
@@ -92,7 +92,7 @@ visionlab/
 ├── evaluation/
 │   └── anomalib/                       # per-Phase anomalib reference runs (evaluation/visionlab is added with Phase 1)
 │       ├── data/                       # per-dataset configs (mvtec.yaml, visa.yaml)
-│       ├── models/                     # per-model configs (<name>.yaml)
+│       ├── models/                     # per-model configs (NN_<name>.yaml, NN = Phase number)
 │       ├── anomalib_run.py             # AnomalibCLI entry point (seed hook)
 │       ├── default.yaml                # default seed_everything, output root and trainer
 │       ├── local_data.py               # datamodule subclasses for local datasets

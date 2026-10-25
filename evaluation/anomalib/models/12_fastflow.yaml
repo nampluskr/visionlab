@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/fastflow.yaml: fastflow model and budget
+# evaluation/anomalib/models/12_fastflow.yaml: fastflow model and budget
 
 model:
   class_path: anomalib.models.Fastflow

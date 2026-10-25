@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/dfm.yaml: dfm model and budget
+# evaluation/anomalib/models/04_dfm.yaml: dfm model and budget
 
 model:
   class_path: anomalib.models.Dfm

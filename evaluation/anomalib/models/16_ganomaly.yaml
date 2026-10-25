@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/ganomaly.yaml: ganomaly model and budget
+# evaluation/anomalib/models/16_ganomaly.yaml: ganomaly model and budget
 
 model:
   class_path: anomalib.models.Ganomaly

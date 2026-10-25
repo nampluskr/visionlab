@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/fre.yaml: fre model
+# evaluation/anomalib/models/09_fre.yaml: fre model
 
 model:
   class_path: anomalib.models.Fre

@@ -45,7 +45,7 @@ Phase 0(`00-dataset.md`)은 1을 데이터셋 노트로, 2와 5를 데이터 대
 | 항목 | 값 |
 |---|---|
 | 진입점 | `evaluation/anomalib/anomalib_run.py train` (`AnomalibCLI`) |
-| 설정 | `default.yaml` + `data/<name>.yaml` + `models/<name>.yaml` (이 순서로 `--config`) |
+| 설정 | `default.yaml` + `data/<name>.yaml` + `models/NN_<name>.yaml` (이 순서로 `--config`) |
 | 학습 예산 | 기본 `max_epochs=10`, `val_split_mode="from_test"`, `val_split_ratio=0.4`, `seed=42`, batch 8/8, `num_workers=0`, `devices=1`. 모델 yaml의 값과 모델이 고정하는 `trainer_arguments`가 우선한다(dfkde·dfm·padim·patchcore·winclip 1 epoch, fre 220 epoch) |
 | 결정적 실행 | `deterministic="warn"`, `CUBLAS_WORKSPACE_CONFIG=:4096:8` |
 | 평가 시점 | 학습 종료 시점(마지막 epoch) 모델 |
