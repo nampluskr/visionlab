@@ -7,7 +7,7 @@
 | ID | 내용 | 판정 방법 |
 |---|---|---|
 | FR-1 | 순수 `MVTecDataset`·`VisADataset`은 `(image, target)`을 반환한다. image는 float32 `[3,H,W]`·`[0,1]`, 평가 target은 label 0/1, mask int64 `[H,W]`, `sample_id`, `image_path`를 가진다 | 정상·이상 샘플의 shape·dtype·범위·필드 검사 테스트 통과 |
-| FR-2 | `MVTecLitData`·`VisALitData`는 native `LightningDataModule`이며 생성자 인자 이름·순서·기본값이 anomalib 2.0.0의 대응 클래스와 같다 | `inspect.signature` 비교 일치 |
+| FR-2 | `MVTecLitData`·`VisALitData`는 native `LightningDataModule`이며 생성자 인자 이름·순서·기본값이 anomalib 2.0.0의 대응 클래스와 같다 | `inspect.signature` 비교 일치. anomalib을 import하는 비교이므로 `evaluation/anomalib/00_compare_data.py`에서 수행 |
 | FR-3 | 분할 기본값은 `test_split_mode="from_dir"`, `val_split_mode="same_as_test"`다. `from_test` 명시 시 valid와 test가 겹치지 않고, 고정 seed에서 새 인스턴스도 같은 목록을 만든다. 미구현 모드는 명시적 오류를 낸다 | 파일 목록 교집합·재생성 비교, 미구현 모드 예외 테스트 |
 | FR-4 | 이식한 순수 모델(예: `STFPMModel`·`EfficientAdModel`)의 평가 출력은 score `[B,1]`, anomaly map `[B,1,H,W]`다 | forward shape 테스트 |
 | FR-5 | 같은 state·입력에서 순수 모델의 raw 출력이 anomalib 원본과 일치한다 | score·map의 allclose 결과 기록. 허용 오차는 실험 전에 확정 |

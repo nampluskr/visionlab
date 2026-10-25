@@ -104,9 +104,6 @@ visionlab/
 │   ├── INTENT.md                       # what and why (SSOT)
 │   ├── PLAN.md
 │   └── SPEC.md
-├── src/
-│   └── visionlab/
-│       └── bootstrap.py                # paths.toml loading, network block, run.json
 ├── AGENTS.md                           # agent rules (CLAUDE.md points here)
 ├── CLAUDE.md
 ├── paths.toml                          # local backbone weight paths (D-12)

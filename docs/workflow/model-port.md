@@ -25,7 +25,8 @@ Phase 0은 모델이 아니라 데이터셋을 다룬다. 1절의 순서를 따�
 
 - 레퍼런스 실행(1~2단계) 대신 anomalib 데이터(`LocalMVTecAD`, `LocalVisa`)와의 대조가 기준이다.
 - codex는 데이터셋을 새로 구현한다(원본 복사 아님, D-18). 만들 파일과 완료 조건은 `specs/PLAN.md`의 Phase 0을 따른다.
-- agy는 `evaluation/anomalib/00_compare_data.py`와 `tests/00_dataset/test_data.py`를 실행한다.
+- 지시와 검증은 0-A(순수 Dataset: `tests/00_dataset/test_data.py`)와 0-B(LitData와 `evaluation/anomalib/00_compare_data.py`)로 나눠 각각 진행한다. 수정 반복 한도(3회)도 단계별로 센다.
+- agy는 단계별로 해당 테스트와 대조 스크립트를 실행한다.
 - Claude는 파일 목록, 라벨, mask, 분할, 최종 입력 텐서의 일치를 판정한다(FR-17).
 
 ## 3. 모델 Phase 시작 준비 (Claude)

@@ -53,13 +53,26 @@ Phase 번호는 두 자리이고 구현 순서다. 모델별 파일이 쌓이는
 ## Phase 0. 데이터셋
 
 - **목적**: 모든 모델이 공유하는 MVTec·VisA 데이터셋을 visionlab에서 새로 구현하고, 모델 비교 전에 anomalib 데이터와 같은지 대조한다(D-13). anomalib 데이터 코드는 복사하지 않는다(D-18의 복사 대상은 models뿐이다).
-- **만드는 것**: `data/common/split.py`, `data/mvtec/`·`data/visa/`의 `dataset.py`(`MVTecDataset`, `VisADataset`)와 `lightning_data.py`(`MVTecLitData`, `VisALitData`), `common/batch.py`(Batch, InferenceBatch), 대조 스크립트 `evaluation/anomalib/00_compare_data.py`, `tests/00_dataset/test_data.py`.
 - **대응 요구 ID**: FR-1, FR-2, FR-3, FR-17, NFR-1, NFR-3
-- **진행 순서**: Claude가 지시하고 codex가 구현한다. Claude가 적대적으로 검증해 수정을 요청한다(최대 3회). agy가 대조 스크립트와 테스트를 실행하고, Claude가 판정·기록한다.
+- **진행 순서**: Claude가 지시하고 codex가 구현한다. Claude가 적대적으로 검증해 수정을 요청한다(최대 3회). agy가 대조 스크립트와 테스트를 실행하고, Claude가 판정·기록한다. 지시와 검증은 아래 두 단계로 나눠 각각 진행한다.
+- **범위 결정**:
+  - 생성자 인자는 anomalib 2.0.0 `MVTecAD`, `Visa`와 이름·순서·기본값이 같다(D-5). 증강 인자(`train_augmentations`, `val_augmentations`, `test_augmentations`, `augmentations`)는 받되 Phase 0에서는 `None`만 지원하고, 값이 있으면 명시적 오류를 낸다.
+  - 분할은 `test_split_mode="from_dir"`(기본)와 `val_split_mode`의 `same_as_test`(기본)·`from_test`를 구현한다. 그 밖의 모드는 명시적 오류를 낸다(X-3). `from_test`의 분할 결과는 같은 seed에서 anomalib과 같은 파일 목록이어야 한다.
+  - VisA는 anomalib `Visa`와 같이 `root/visa_pytorch`를 읽는다. 복사본 생성(D-17)은 하지 않으며 없으면 `FileNotFoundError`를 낸다. 다운로드는 구현하지 않는다(NFR-3).
+  - Dataset Transform은 RGB 변환, 이미지와 mask의 resize, float 변환만 한다. 정규화는 PreProcessor 몫이다(D-6).
+  - `src/visionlab/bootstrap.py`는 현행 D-12와 맞지 않고 참조가 없어 삭제했다. 파일 해시와 오프라인 보호는 필요한 Phase에서 `utils/io.py`로 새로 만든다.
+
+### 단계 0-A. 순수 Dataset
+
+- **만드는 것**: `common/batch.py`(Batch, InferenceBatch), `data/common/split.py`(TestSplitMode, ValSplitMode와 분할 함수), `data/mvtec/dataset.py`(`MVTecDataset`), `data/visa/dataset.py`(`VisADataset`), `tests/00_dataset/test_data.py`.
+- **완료 조건**: FR-1과 FR-3의 판정 방법이 통과한다. Lightning과 anomalib을 import하지 않고 동작한다(NFR-1, NFR-2). 테스트는 anomalib을 import하지 않는다.
+
+### 단계 0-B. LitData와 anomalib 대조
+
+- **만드는 것**: `data/mvtec/lightning_data.py`(`MVTecLitData`), `data/visa/lightning_data.py`(`VisALitData`), `evaluation/anomalib/00_compare_data.py`.
 - **완료 조건**:
-  - FR-1·FR-2·FR-3의 판정 방법이 통과한다.
-  - mvtec `bottle`, visa `candle`에서 파일 목록, 라벨, mask, `from_test` 분할(seed 42), 최종 입력 텐서가 anomalib(`LocalMVTecAD`, `LocalVisa`)과 일치한다(FR-17). 결과를 `docs/results/00-dataset.md`에 데이터 검증 ID(manifest 해시)와 함께 기록한다.
-  - `src/visionlab`이 anomalib을 import하지 않는다(NFR-1). Dataset은 Lightning 없이 동작한다.
+  - FR-2: 두 LitData의 생성자 시그니처(인자 이름·순서·기본값)가 anomalib `MVTecAD`, `Visa`와 `inspect.signature`로 일치한다. 이 비교는 anomalib을 import하므로 `00_compare_data.py`에서 한다.
+  - FR-17: mvtec `bottle`, visa `candle`에서 파일 목록, 라벨, mask, `from_test` 분할(0.4, seed 42), 최종 입력 텐서가 anomalib(`LocalMVTecAD`, `LocalVisa`)과 일치한다. 결과를 `docs/results/00-dataset.md`에 데이터 검증 ID(manifest 해시)와 함께 기록한다.
 
 ## Phase 공통 양식
 
