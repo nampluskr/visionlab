@@ -15,6 +15,7 @@ SOURCE_ROOT = os.path.join(PROJECT_ROOT, "src", "visionlab")
 LIGHTNING_FILES = {
     "anomaly_detection/data/mvtec/lightning_data.py", "anomaly_detection/data/visa/lightning_data.py",
     "anomaly_detection/models/stfpm/lightning_model.py", "anomaly_detection/common/lightning_visualizer.py",
+    "anomaly_detection/models/efficient_ad/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -63,7 +64,9 @@ def classified_modules():
                                   "anomaly_detection/common/", "inference/", "utils/")) or \
                 (relative.startswith("anomaly_detection/data/") and name == "dataset.py") or \
                 (relative.startswith("anomaly_detection/models/stfpm/") and
-                 name in ("model.py", "loss.py", "anomaly_map.py", "__init__.py")) or name == "__init__.py":
+                 name in ("model.py", "loss.py", "anomaly_map.py", "__init__.py")) or \
+                (relative.startswith("anomaly_detection/models/efficient_ad/") and name == "model.py") or \
+                name == "__init__.py":
             group = "pure"
         else:
             raise AssertionError(f"Unclassified source file: {relative}")

@@ -7,7 +7,7 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 from tensorboard.util.tensor_util import make_ndarray
 
 
-def read_history(run):
+def read_history(run, tag="train_loss_epoch"):
     """Print all scalar records per event file and collect epoch losses without a verdict."""
     root = os.path.join(run, "lightning_logs")
     paths = sorted(os.path.join(directory, name) for directory, _, names in os.walk(root)
@@ -20,17 +20,17 @@ def read_history(run):
         events = EventAccumulator(path, size_guidance={"scalars": 0, "tensors": 0})
         events.Reload()
         records = {}
-        for tag in events.Tags().get("scalars", []):
-            records[tag] = [(event.step, event.value, event.wall_time) for event in events.Scalars(tag)]
-        for tag in events.Tags().get("tensors", []):
-            for event in events.Tensors(tag):
+        for name in events.Tags().get("scalars", []):
+            records[name] = [(event.step, event.value, event.wall_time) for event in events.Scalars(name)]
+        for name in events.Tags().get("tensors", []):
+            for event in events.Tensors(name):
                 value = make_ndarray(event.tensor_proto)
                 if value.ndim == 0 and value.dtype.kind in "biuf":
-                    records.setdefault(tag, []).append((event.step, float(value), event.wall_time))
+                    records.setdefault(name, []).append((event.step, float(value), event.wall_time))
         print(f"Event file: {path}")
-        for tag, values in sorted(records.items()):
-            print(f"  {tag}: {[(step, value) for step, value, _ in values]}")
-        for step, value, wall_time in sorted(records.get("train_loss_epoch", []), key=lambda item: item[2]):
+        for name, values in sorted(records.items()):
+            print(f"  {name}: {[(step, value) for step, value, _ in values]}")
+        for step, value, wall_time in sorted(records.get(tag, []), key=lambda item: item[2]):
             candidates = [event for event in records.get("epoch", []) if event[0] == step]
             epoch = int(min(candidates, key=lambda item: abs(item[2] - wall_time))[1]) if candidates else fallback_epoch
             fallback_epoch += 1
@@ -39,14 +39,8 @@ def read_history(run):
     return {epoch: value for epoch, (value, _) in losses.items()}
 
 
-def main():
-    """Display loss differences for human interpretation without assigning tolerances."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--reference", required=True)
-    parser.add_argument("--native", required=True)
-    args = parser.parse_args()
-    reference = read_history(os.path.abspath(args.reference))
-    native = read_history(os.path.abspath(args.native))
+def print_comparison(reference, native):
+    """Print one epoch comparison table without assigning tolerances."""
     print("| Epoch | Reference | Native | Absolute difference | Relative difference |")
     print("|---:|---:|---:|---:|---:|")
     for epoch in sorted(reference.keys() | native.keys()):
@@ -57,6 +51,20 @@ def main():
         difference = abs(left - right)
         relative = difference / abs(left) if left != 0 else (0.0 if difference == 0 else float("inf"))
         print(f"| {epoch} | {left:.10g} | {right:.10g} | {difference:.10g} | {relative:.10g} |")
+
+
+def main():
+    """Display each requested epoch tag for human interpretation."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reference", required=True)
+    parser.add_argument("--native", required=True)
+    parser.add_argument("--tags", nargs="+", default=["train_loss_epoch"])
+    args = parser.parse_args()
+    for tag in args.tags:
+        reference = read_history(os.path.abspath(args.reference), tag=tag)
+        native = read_history(os.path.abspath(args.native), tag=tag)
+        print(f"Tag: {tag}")
+        print_comparison(reference, native)
 
 
 if __name__ == "__main__":

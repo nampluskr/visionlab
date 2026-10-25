@@ -54,6 +54,21 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
+def load_pretrained_teacher(module, key):
+    """Inject a required local teacher state with strict key validation."""
+    import torch
+
+    with open(PATHS_FILE, "rb") as stream:
+        teachers = tomllib.load(stream).get("teachers", {})
+    if key not in teachers:
+        raise FileNotFoundError(f"Missing teacher '{key}' in {PATHS_FILE}")
+    path = os.path.abspath(teachers[key])
+    if not os.path.isfile(path):
+        raise FileNotFoundError(path)
+    module.load_state_dict(torch.load(path, map_location="cpu", weights_only=True), strict=True)
+    return path
+
+
 def _deny_connection(*args, **kwargs):
     """Reject every socket connection signature."""
     raise RuntimeError("network access is blocked")
@@ -85,7 +100,7 @@ def create_versioned_dir(root):
             version += 1
 
 
-def save_export(path, model, model_args, pre_processor, post_processor):
+def save_export(path, model, model_name, model_args, pre_processor, post_processor):
     """Save teacher-inclusive pure model weights and processing state."""
     import torch
 
@@ -93,8 +108,8 @@ def save_export(path, model, model_args, pre_processor, post_processor):
     std = None if pre_processor is None or pre_processor.std is None else pre_processor.std.flatten().tolist()
     payload = {
         "format_version": 1,
-        "model_name": "stfpm",
-        "model_args": {"backbone": model_args["backbone"], "layers": list(model_args["layers"])},
+        "model_name": model_name,
+        "model_args": model_args,
         "model_state": {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()},
         "pre_processor": {"mean": mean, "std": std},
         "post_processor": None if post_processor is None else post_processor.state_dict(),
@@ -111,7 +126,7 @@ def load_export(path):
     required = {"format_version", "model_name", "model_args", "model_state", "pre_processor", "post_processor"}
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("Invalid model export fields")
-    if payload["format_version"] != 1 or payload["model_name"] != "stfpm":
+    if payload["format_version"] != 1 or payload["model_name"] not in ("stfpm", "efficient_ad"):
         raise ValueError("Unsupported model export format")
     return payload
 

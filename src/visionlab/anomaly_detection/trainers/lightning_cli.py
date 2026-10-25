@@ -77,7 +77,7 @@ class LitCLI(LightningCLI):
 
     def before_instantiate_classes(self):
         config = self.config[self.subcommand] if self.subcommand else self.config
-        model_name = config["model"]["class_path"].rsplit(".", 1)[-1].removesuffix("LitModel").lower()
+        model_name = config["model"]["class_path"].split(".")[-3]
         data_name = config["data"]["class_path"].rsplit(".", 1)[-1].removesuffix("LitData").lower()
         category = config["data"]["init_args"]["category"]
         if os.path.basename(category) != category or category in (".", ".."):

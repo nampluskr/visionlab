@@ -5,3 +5,8 @@
 resnet18 = "D:/backbones/resnet18-f37072fd.pth"
 resnet50 = "D:/backbones/resnet50-0676ba61.pth"
 wide_resnet50_2 = "D:/backbones/wide_resnet50_2-95faca4d.pth"
+
+# Pretrained teachers that are not timm models. Keys are <model>_<model_size>.
+[teachers]
+efficient_ad_small = "D:/backbones/efficientad_pretrained_weights/pretrained_teacher_small.pth"
+efficient_ad_medium = "D:/backbones/efficientad_pretrained_weights/pretrained_teacher_medium.pth"

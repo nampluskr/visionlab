@@ -145,7 +145,8 @@ class StfpmLitModel(LightningModule):
             save_export(
                 path=os.path.join(self.trainer.default_root_dir, "export", "model.pt"),
                 model=self.model,
-                model_args={"backbone": self.backbone, "layers": self.layers},
+                model_name="stfpm",
+                model_args={"backbone": self.backbone, "layers": list(self.layers)},
                 pre_processor=self.pre_processor,
                 post_processor=self.post_processor,
             )

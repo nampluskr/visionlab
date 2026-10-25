@@ -1,10 +1,11 @@
-# src/visionlab/inference/predictor.py: export-only pure PyTorch STFPM inference
+# src/visionlab/inference/predictor.py: export-only pure PyTorch model inference
 
 import torch
 
 from visionlab.anomaly_detection.common.post_processor import PostProcessor
 from visionlab.anomaly_detection.common.pre_processor import PreProcessor
 from visionlab.anomaly_detection.models.stfpm.model import STFPMModel
+from visionlab.anomaly_detection.models.efficient_ad.model import EfficientAdModel
 from visionlab.utils.io import load_export
 
 
@@ -20,7 +21,8 @@ class Predictor:
     @classmethod
     def from_export(cls, path, device="cpu"):
         exported = load_export(path)
-        model = STFPMModel(backbone=exported["model_args"]["backbone"], layers=exported["model_args"]["layers"])
+        models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel}
+        model = models[exported["model_name"]](**exported["model_args"])
         model.load_state_dict(exported["model_state"], strict=True)
         pre_processor = PreProcessor(mean=exported["pre_processor"]["mean"], std=exported["pre_processor"]["std"])
         post_processor = None

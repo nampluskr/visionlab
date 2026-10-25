@@ -19,6 +19,3 @@ data:
   init_args:
     train_batch_size: 1
     eval_batch_size: 16
-
-trainer:
-  max_epochs: 20

@@ -309,7 +309,7 @@ def test_pure_constructor_and_export_loader_without_training_imports(tmp_path):
     """Restore an uncalibrated full export with training imports blocked in a subprocess."""
     pure = STFPMModel(layers=["layer1", "layer2", "layer3"])
     path = os.path.join(tmp_path, "export.pt")
-    io_utils.save_export(path, pure, {"backbone": "resnet18", "layers": ["layer1", "layer2", "layer3"]},
+    io_utils.save_export(path, pure, "stfpm", {"backbone": "resnet18", "layers": ["layer1", "layer2", "layer3"]},
                          PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD), PostProcessor())
     script = '''
 import importlib.abc

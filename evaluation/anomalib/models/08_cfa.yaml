@@ -11,6 +11,3 @@ model:
     num_hard_negative_features: 3
     radius: 0.00001
     visualizer: false
-
-trainer:
-  max_epochs: 30

@@ -54,8 +54,8 @@ def produce_export(root):
     torch.save({"images": batch[0], "outputs": {name: outputs[name] for name in names}},
                os.path.join(root, "expected.pt"))
     export_path = os.path.join(root, "export", "model.pt")
-    io_utils.save_export(path=export_path, model=wrapper.model,
-                         model_args={"backbone": wrapper.backbone, "layers": wrapper.layers},
+    io_utils.save_export(path=export_path, model=wrapper.model, model_name="stfpm",
+                         model_args={"backbone": wrapper.backbone, "layers": list(wrapper.layers)},
                          pre_processor=wrapper.pre_processor, post_processor=wrapper.post_processor)
     exported = io_utils.load_export(export_path)
     del exported["model_state"][next(iter(exported["model_state"]))]

@@ -123,3 +123,19 @@ def test_train_entry_runs_fit_then_test(cli_args):
     cli = entry["main"](args=["train"] + cli_args("fit")[1:])
     assert "test" in cli.model.last_metrics
     assert os.path.isfile(os.path.join(cli.trainer.default_root_dir, "run.json"))
+
+
+def test_efficient_ad_config_merging_and_output_name(tmp_path, monkeypatch):
+    """Apply EfficientAD data overrides while retaining shared epochs and its package name."""
+    helpers = runpy.run_path(os.path.join(PROJECT_ROOT, "tests", "02_efficient_ad", "test_efficient_ad.py"))
+    paths_file, imagenet_dir, _ = helpers["make_efficient_assets"](str(tmp_path), teacher_out_channels=384)
+    monkeypatch.setattr(io_utils, "PATHS_FILE", paths_file)
+    cli = LitCLI(args=["--data", "mvtec", "--model", "efficient_ad", "--model.init_args.imagenet_dir", imagenet_dir,
+                       "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                       "--trainer.devices", "1", "--trainer.logger", "false", "--trainer.num_sanity_val_steps", "2"],
+                 run=False)
+    assert cli.datamodule.train_batch_size == 1 and cli.datamodule.eval_batch_size == 16
+    assert cli.trainer.max_epochs == 10 and cli.trainer.num_sanity_val_steps == 0
+    assert cli.model.model_size.value == "small" and cli.model.visualizer is None
+    assert cli.model.pre_processor.mean is None
+    assert cli.trainer.default_root_dir.endswith(os.path.join("efficient_ad", "mvtec_bottle", "v0"))

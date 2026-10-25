@@ -9,6 +9,3 @@ model:
     conv3x3_only: false
     hidden_ratio: 1.0
     visualizer: false
-
-trainer:
-  max_epochs: 100

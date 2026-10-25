@@ -1,4 +1,4 @@
-# evaluation/anomalib/compare_outputs.py: compare local STFPM weights, forwards and processing with the reference
+# evaluation/anomalib/compare_outputs.py: compare local model weights, forwards and processing with the reference
 
 from local_setup import setup_local
 
@@ -20,7 +20,7 @@ import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Stfpm
+from anomalib.models import EfficientAd, Stfpm
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
 
 from visionlab.anomaly_detection.common.metric import AUROC, F1
@@ -30,11 +30,16 @@ from visionlab.anomaly_detection.data.mvtec.dataset import MVTecDataset
 from visionlab.anomaly_detection.data.visa.dataset import VisADataset
 from visionlab.anomaly_detection.models.stfpm.lightning_model import StfpmLitModel
 from visionlab.anomaly_detection.models.stfpm.model import STFPMModel
+from visionlab.anomaly_detection.models.efficient_ad.lightning_model import EfficientAdLitModel
+from visionlab.anomaly_detection.models.efficient_ad.model import EfficientAdModel
 from visionlab.utils.io import file_sha256
+from local_models import LocalEfficientAd
 
 RTOL = 1e-4
 ATOL = 1e-5
 METRIC_ATOL = 1e-6
+EFFICIENT_AD_RTOL = 1e-5
+EFFICIENT_AD_ATOL = 1e-6
 
 
 def signature_fields(model_class):
@@ -49,10 +54,10 @@ def record_check(checks, name, passed, details):
     print(f"{'PASS' if passed else 'FAIL'} {name}: {details}")
 
 
-def compare_tensor(checks, name, reference, native):
+def compare_tensor(checks, name, reference, native, rtol=RTOL, atol=ATOL):
     """Check shape and values at the fixed forward tolerance."""
     same_shape = reference.shape == native.shape
-    passed = same_shape and torch.allclose(reference, native, rtol=RTOL, atol=ATOL)
+    passed = same_shape and torch.allclose(reference, native, rtol=rtol, atol=atol)
     difference = (reference - native).abs().max().item() if same_shape and reference.numel() else None
     if difference is not None and not math.isfinite(difference):
         difference = None
@@ -152,16 +157,116 @@ def compare_processing(checks):
                      {"threshold": sensitivity.item()})
 
 
+def compare_efficient_ad_forwards(checks, reference, native, data, samples):
+    """Compare real 256 inputs, calibrated maps, distances and deterministic student loss."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = torch.stack([dataset[index][0] for index in range(count)])
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    for calibrated in (False, True):
+        with torch.no_grad():
+            reference.mean_std["mean"].fill_(0.2 if calibrated else 0)
+            reference.mean_std["std"].fill_(1.3 if calibrated else 0)
+            for name in reference.quantiles:
+                reference.quantiles[name].fill_((0.8 if name.startswith("qb") else 0.1) if calibrated else 0)
+        native.load_state_dict(reference.state_dict(), strict=True)
+        reference.eval()
+        native.eval()
+        prefix = f"FR-5 {data} {'calibrated' if calibrated else 'unset'}"
+        with torch.no_grad():
+            expected, actual = reference(images), native(images)
+            pairs = [("pred_score", expected.pred_score, actual.pred_score),
+                     ("anomaly_map", expected.anomaly_map, actual.anomaly_map)]
+            expected_distance = reference.compute_student_teacher_distance(images)
+            actual_distance = native.compute_student_teacher_distance(images)
+            pairs.extend((name, left, right) for name, left, right in
+                         zip(("student_output", "distance_st"), expected_distance, actual_distance, strict=True))
+            pairs.extend((name, left, right) for name, left, right in
+                         zip(("map_st raw", "map_stae raw"), reference.get_maps(images, normalize=False),
+                             native.get_maps(images, normalize=False), strict=True))
+            for name, left, right in pairs:
+                compare_tensor(checks, f"{prefix} {name}", left, right,
+                               rtol=EFFICIENT_AD_RTOL, atol=EFFICIENT_AD_ATOL)
+            reference.train()
+            native.train()
+            batch_imagenet = images[:1].flip(-1)
+            expected_loss = reference(batch=images[:1], batch_imagenet=batch_imagenet)[0]
+            actual_loss = native(batch=images[:1], batch_imagenet=batch_imagenet)[0]
+            compare_tensor(checks, f"{prefix} loss_st", expected_loss, actual_loss,
+                           rtol=EFFICIENT_AD_RTOL, atol=EFFICIENT_AD_ATOL)
+
+
+def compare_efficient_ad(checks, samples):
+    """Check EfficientAD constructor, injected teacher and original pure-model computations."""
+    record_check(checks, "FR-6 constructor signature", signature_fields(EfficientAd) == signature_fields(EfficientAdLitModel),
+                 {"reference": signature_fields(EfficientAd), "native": signature_fields(EfficientAdLitModel)})
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "models", "efficient_ad.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["model"]["init_args"]
+    native = EfficientAdLitModel(imagenet_dir=config["imagenet_dir"], model_size=config["model_size"],
+                                 pre_processor=False, post_processor=False, evaluator=False, visualizer=False)
+    reference = LocalEfficientAd(teacher_file=native.teacher_weights_path, imagenet_dir=config["imagenet_dir"],
+                                 model_size=config["model_size"], pre_processor=False, post_processor=False,
+                                 evaluator=False, visualizer=False)
+    reference.prepare_pretrained_model()
+    expected, actual = reference.model.teacher.state_dict(), native.model.teacher.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local teacher", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    pure = EfficientAdModel(teacher_out_channels=384, model_size=config["model_size"])
+    for data in ("mvtec", "visa"):
+        try:
+            compare_efficient_ad_forwards(checks, reference.model, pure, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm",), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad"), required=True)
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
     if args.samples < 1:
         parser.error("--samples must be positive")
     checks = []
-    print(f"Fixed tolerances: rtol={RTOL}, atol={ATOL}, metric_atol={METRIC_ATOL}")
+    rtol, atol = (EFFICIENT_AD_RTOL, EFFICIENT_AD_ATOL) if args.model == "efficient_ad" else (RTOL, ATOL)
+    print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
+    if args.model == "efficient_ad":
+        try:
+            compare_efficient_ad(checks, args.samples)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    else:
+        compare_stfpm(checks, args.samples)
+    try:
+        compare_processing(checks)
+    except Exception as error:
+        record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
+    report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
+              "passed": all(check["passed"] for check in checks), "checks": checks}
+    path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as stream:
+        json.dump(report, stream, indent=2, allow_nan=False)
+        stream.write("\n")
+    print(f"Manifest: {path}")
+    return 0 if report["passed"] else 1
+
+
+def compare_stfpm(checks, samples):
+    """Keep the original STFPM teacher and forward comparison unchanged."""
     record_check(checks, "FR-6 constructor signature", signature_fields(Stfpm) == signature_fields(StfpmLitModel),
                  {"reference": signature_fields(Stfpm), "native": signature_fields(StfpmLitModel)})
     try:
@@ -178,24 +283,11 @@ def main():
         pure.load_state_dict(reference.model.state_dict(), strict=True)
         for data in ("mvtec", "visa"):
             try:
-                compare_forwards(checks, reference.model, pure, data, args.samples)
+                compare_forwards(checks, reference.model, pure, data, samples)
             except Exception as error:
                 record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
     except Exception as error:
         record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
-    try:
-        compare_processing(checks)
-    except Exception as error:
-        record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
-    report = {"model": args.model, "rtol": RTOL, "atol": ATOL, "metric_atol": METRIC_ATOL,
-              "passed": all(check["passed"] for check in checks), "checks": checks}
-    path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as stream:
-        json.dump(report, stream, indent=2, allow_nan=False)
-        stream.write("\n")
-    print(f"Manifest: {path}")
-    return 0 if report["passed"] else 1
 
 
 if __name__ == "__main__":

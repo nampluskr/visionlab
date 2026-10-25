@@ -1,0 +1,18 @@
+# src/visionlab/anomaly_detection/configs/models/efficient_ad.yaml: local EfficientAD model and budget
+model:
+  class_path: visionlab.anomaly_detection.models.efficient_ad.lightning_model.EfficientAdLitModel
+  init_args:
+    imagenet_dir: D:/datasets/imagenette2/train
+    model_size: small
+    teacher_out_channels: 384
+    lr: 0.0001
+    weight_decay: 0.00001
+    padding: false
+    pad_maps: true
+    visualizer: false
+
+# Pass --data <name> before --model efficient_ad to preserve these overrides.
+data:
+  init_args:
+    train_batch_size: 1
+    eval_batch_size: 16

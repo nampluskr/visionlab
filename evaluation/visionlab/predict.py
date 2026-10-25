@@ -44,7 +44,7 @@ def latest_export(model, data, category):
 def main(args=None):
     """Evaluate the configured pure test split and save explicit metric failure reasons."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm",), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad"), required=True)
     parser.add_argument("--data", choices=("mvtec", "visa"), required=True)
     parser.add_argument("--export")
     parser.add_argument("--category")
@@ -52,6 +52,10 @@ def main(args=None):
     config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{args.data}.yaml")
     with open(config_path, encoding="utf-8") as stream:
         config = yaml.safe_load(stream)["data"]["init_args"]
+    model_config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "models",
+                                     f"{args.model}.yaml")
+    with open(model_config_path, encoding="utf-8") as stream:
+        config.update(yaml.safe_load(stream).get("data", {}).get("init_args", {}))
     category = args.category or config["category"]
     if os.path.basename(category) != category or category in (".", ".."):
         parser.error("--category must be a single directory name")

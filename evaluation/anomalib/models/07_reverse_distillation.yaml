@@ -7,6 +7,3 @@ model:
     layers: [layer1, layer2, layer3]
     pre_trained: true
     visualizer: false
-
-trainer:
-  max_epochs: 200
