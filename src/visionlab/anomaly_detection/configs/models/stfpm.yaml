@@ -1,0 +1,7 @@
+# src/visionlab/anomaly_detection/configs/models/stfpm.yaml: native STFPM matching the reference model settings
+model:
+  class_path: visionlab.anomaly_detection.models.stfpm.lightning_model.StfpmLitModel
+  init_args:
+    backbone: resnet18
+    layers: [layer1, layer2, layer3]
+    visualizer: false

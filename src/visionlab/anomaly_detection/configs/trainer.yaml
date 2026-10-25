@@ -1,0 +1,17 @@
+# src/visionlab/anomaly_detection/configs/trainer.yaml: shared native training budget and final-epoch checkpoint
+trainer:
+  max_epochs: 10
+  devices: 1
+  deterministic: warn
+  logger: true
+  default_root_dir: D:/projects/visionlab/outputs/visionlab
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        filename: model
+        monitor: null
+        save_top_k: 1
+        save_last: false
+        every_n_epochs: 1
+        save_on_train_epoch_end: false
+        enable_version_counter: false

@@ -88,3 +88,6 @@ class MVTecLitData(LightningDataModule):
         return DataLoader(
             dataset=self.test_data, batch_size=self.eval_batch_size, num_workers=self.num_workers, shuffle=False,
         )
+
+    def predict_dataloader(self):
+        return self.test_dataloader()

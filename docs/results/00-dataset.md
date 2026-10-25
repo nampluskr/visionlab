@@ -7,7 +7,7 @@ MVTec AD와 VisA 데이터셋을 visionlab에서 새로 구현하고 anomalib 2.
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | 0-A | 순수 Dataset (`batch.py`, `split.py`, `dataset.py` x2, `test_data.py`) | 구현, 검증, 실행 완료 (수정 요청 0회) |
-| 0-B | LitData x2, `00_compare_data.py`, anomalib 대조 | 구현, 검증, 실행 완료 (수정 요청 1회) |
+| 0-B | LitData x2, `compare_data.py`(실행 당시 이름 `00_compare_data.py`), anomalib 대조 | 구현, 검증, 실행 완료 (수정 요청 1회) |
 
 ## 1. 데이터셋 노트
 
@@ -25,7 +25,7 @@ MVTec AD와 VisA 데이터셋을 visionlab에서 새로 구현하고 anomalib 2.
 
 ## 2. anomalib 대조 결과 (데이터 검증 ID)
 
-2026-10-25에 agy가 `00_compare_data.py`를 category별로 실행했다(실행으로 검증함, 종료 코드 0). Claude는 manifest 파일의 sha256과 로그의 PASS, FAIL 줄을 직접 다시 확인했다. 데이터 검증 ID는 manifest 파일의 sha256이다.
+2026-10-25에 agy가 `00_compare_data.py`를 category별로 실행했다(실행으로 검증함, 종료 코드 0). 이 스크립트는 같은 날 사용자 결정으로 `compare_data.py`로 이름이 바뀌었다(D-15의 이름 규칙 통일). 아래 명령과 지시문은 실행 당시의 이름을 그대로 남기고, 이름 변경 뒤 다시 실행한 결과는 이 절 끝에 적는다. Claude는 manifest 파일의 sha256과 로그의 PASS, FAIL 줄을 직접 다시 확인했다. 데이터 검증 ID는 manifest 파일의 sha256이다.
 
 다음 표는 category별 대조 결과다. 판정 항목 187개가 모두 PASS이고 FAIL은 0개다.
 
@@ -44,6 +44,40 @@ MVTec AD와 VisA 데이터셋을 visionlab에서 새로 구현하고 anomalib 2.
 - 생성자 시그니처는 `MVTecAD`, `Visa`와 `inspect.signature`의 이름, 순서, 종류, 기본값 repr이 일치했다. 증강 인자는 둘 다 받고 `None`만 허용한다. annotation은 프로젝트 규칙(type hint 금지)에 따라 비교에서 제외했다.
 - VisA는 anomalib이 `D:\datasets\visa_anomalib\visa_pytorch`에 만든 작업 복사본(D-17)을 두 쪽이 같이 읽는다. visionlab 쪽 root는 `D:\datasets\visa_anomalib`이다.
 
+### 실행 명령
+
+agy가 PowerShell에서 실행한 명령이다(2026-10-25, 작업 폴더 `D:\projects\visionlab`, 종료 코드 모두 0). 로그는 `outputs/logs/`에 UTF-16으로 저장됐다. 명령마다 승인 창이 떴고 Claude가 한 번씩 승인했다.
+
+0-A 순수 Dataset 테스트(`00-0A-test-261025-1.log`, 리팩토링 뒤 회귀는 `-2.log`)는 다음과 같다.
+
+```powershell
+New-Item -ItemType Directory -Force D:\projects\visionlab\outputs\logs | Out-Null
+cd D:\projects\visionlab
+& 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe' 'D:\projects\visionlab\tests\00_dataset\test_data.py' 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\00-0A-test-261025-1.log
+$LASTEXITCODE
+```
+
+0-B anomalib 대조(`00-0B-mvtec-261025-1.log`, `00-0B-visa-261025-1.log`, 회귀는 `-2.log`)는 다음과 같다.
+
+```powershell
+cd D:\projects\visionlab
+& 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe' 'D:\projects\visionlab\evaluation\anomalib\00_compare_data.py' --data mvtec 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\00-0B-mvtec-261025-1.log
+$LASTEXITCODE
+& 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe' 'D:\projects\visionlab\evaluation\anomalib\00_compare_data.py' --data visa 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\00-0B-visa-261025-1.log
+$LASTEXITCODE
+```
+
+`BaseDataset` 리팩토링 뒤 회귀 실행은 위 세 명령을 로그 이름만 `-2.log`로 바꿔 한 번에 실행했다(테스트 1개, 대조 2개 순서).
+
+스크립트 이름을 `00_compare_data.py`에서 `compare_data.py`로 바꾼 뒤(사용자 결정, 2026-10-25, 내용은 첫 줄 주석의 경로 한 줄만 다름을 커밋된 원본과 `diff`로 확인) 같은 대조를 다시 실행했다(agy, 승인 창마다 Claude가 명령을 확인하고 한 번씩 승인). 결과는 두 데이터셋 모두 PASS 186줄, FAIL 0줄이고 manifest의 sha256이 위에 기록한 데이터 검증 ID와 같다(실행으로 검증함).
+
+```powershell
+cd D:\projects\visionlab
+$py = 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe'
+& $py evaluation/anomalib/compare_data.py --data mvtec 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\00-0B-mvtec-261025-3.log
+& $py evaluation/anomalib/compare_data.py --data visa 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\00-0B-visa-261025-3.log
+```
+
 ## 3. 구현 메모
 
 다음 표는 0-A, 0-B 파일과 anomalib 원본의 대응이다. 데이터 코드는 복사하지 않고 새로 썼다(D-18).
@@ -55,7 +89,7 @@ MVTec AD와 VisA 데이터셋을 visionlab에서 새로 구현하고 anomalib 2.
 | `data/mvtec/dataset.py` | `make_mvtec_ad_dataset`, `MVTecADDataset`, `read_image`, `read_mask` |
 | `data/visa/dataset.py` | `VisaDataset`(`MVTecDataset`을 상속, 확장자와 `visa_pytorch` 경로만 다름) |
 | `data/mvtec/lightning_data.py`, `data/visa/lightning_data.py` | `MVTecAD`, `Visa` 데이터모듈의 생성자, `setup`, dataloader |
-| `evaluation/anomalib/00_compare_data.py` | 대조 스크립트(새로 작성) |
+| `evaluation/anomalib/compare_data.py` | 대조 스크립트(새로 작성, 처음 이름은 `00_compare_data.py`) |
 
 의도적으로 다르게 한 곳은 다음과 같다.
 
@@ -106,6 +140,15 @@ Claude가 anomalib 원본 소스와 이식 코드를 줄 단위로 대조했다.
 | FR-17 (anomalib 대조) | 파일 목록, 라벨, mask 경로, 분할, 최종 입력이 두 category에서 일치. 데이터 검증 ID는 2절 | 충족(앞쪽 8개 한계 있음) |
 | NFR-1, NFR-2 | 순수 Dataset은 Lightning과 anomalib을 import하지 않고 테스트에서 import를 차단한 채 통과 | 충족 |
 | NFR-3 | 다운로드와 복사본 생성 없음, 폴더가 없으면 `FileNotFoundError`(테스트) | 충족 |
+
+사용자 결정(2026-10-25, D-21, NFR-6)으로 `tests/00_dataset/test_data.py`를 `unittest`에서 pytest로 바꿨다. 위 표의 9개 통과 기록은 변환 전이고, BaseDataset 리팩토링 검사 1개가 합쳐진 변환 후 10개 테스트가 통과했다. 명령은 다음과 같다(agy, 2026-10-25, 종료 코드는 로그로 확인, 실행으로 검증함).
+
+```powershell
+cd D:\projects\visionlab
+& 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe' -m pytest tests\00_dataset 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\00-pytest-261025-1.log
+```
+
+결과는 `10 passed in 5.23s`(`outputs/logs/00-pytest-261025-1.log`)다.
 
 지시 과정에서 남길 점 두 가지를 적는다. agy는 0-A 실행 보고에서 "승인 프롬프트 없이 실행됐다"고 했으나 실제로는 승인 창이 떴고 Claude가 명령마다 한 번씩만 승인했다(0-A 1회, 0-B 2회, 영구 허용 없음). agy의 자기 보고는 근거로 쓰지 않았다. 0-B 지시문의 금지 항목 첫 줄에 "anomalib·Lightning 외"라는 어색한 문구가 들어갔으나, 같은 줄의 규칙(`src/`는 anomalib import 금지)과 결과 파일로 의도대로 구현됐다.
 

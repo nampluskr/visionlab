@@ -30,7 +30,7 @@
 - 요구가 바뀌면 `SPEC.md`부터 고친다. 코드로 우회하지 않는다.
 - major·minor 버전 번호는 사람이 정한다. 스스로 올리지 않는다.
 - 완료 조건은 `PLAN.md`에 적힌 것으로 판정한다. 근거를 대지 못하면 미충족이다. "통과"를 기본값으로 두지 않는다.
-- 결과는 Phase마다 `docs/results/NN-<kebab-case>.md`에 기록한다(작성 규칙은 `docs/results/README.md`). "구현함"과 "실행으로 검증함"을 구별해 적는다. 수치가 나아지지 않은 결과도 지우지 않고 원인과 판단을 남긴다.
+- 결과는 Phase마다 `docs/results/NN-<kebab-case>.md`에 기록한다(작성 규칙은 `docs/results/README.md`). "구현함"과 "실행으로 검증함"을 구별해 적고, agy가 터미널에서 실행한 명령은 결과 파일에 그대로(작업 폴더, 파이썬 경로, 인자, 로그 경로, 중단·실패 여부 포함) 적는다(`docs/workflow/model-port.md` 7.2절). 수치가 나아지지 않은 결과도 지우지 않고 원인과 판단을 남긴다.
 - 막히면 추측으로 채우지 말고 멈추고 묻는다. 되돌릴 수 없는 작업(삭제, 외부 상태 변경)은 먼저 묻는다.
 
 ## Markdown 작성 규칙
@@ -74,6 +74,8 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 | codex | Claude의 지시로 코드를 이식한다(native Lightning 모델, 순수 PyTorch 모델, yaml) | `evaluation/`, `src/`, `tests/`만 쓴다. 코드를 실행하지 않는다 |
 | agy | Claude가 보낸 터미널 명령을 그대로 실행하고 출력을 돌려준다(레퍼런스 실행, 이식 결과 실행) | 받은 명령만 실행한다. 파일을 고치지 않는다 |
 
+- Claude가 codex의 구현을 검증할 때 가장 중점적으로 보는 것은 두 가지다. 첫째, anomalib 의존성이 `src/visionlab`에서 완전히 삭제되고 native Lightning(`XXXLitModel`)만으로 구현됐는가. 둘째, 로컬 pretrained 가중치를 외부 인터넷 연결을 차단한 채 쓰는가, 그리고 anomalib 레퍼런스와 에폭별 학습 히스토리·최종 성능값이 맞는가(세부는 `docs/workflow/model-port.md` 6절).
+- 레퍼런스 실행은 데이터셋마다 1회만 한다(실행 시간 비용, 사용자 결정).
 - 다른 에이전트에는 사용자가 Claude에게 결정한 것만 전한다. 다른 에이전트의 결과는 Claude가 검증한 뒤 기록한다.
 - 이식 구현은 codex, 검증은 Claude로 벤더를 나눈다(워크스페이스의 반대 벤더 검증).
 - 각 Phase가 끝나 사용자가 종료를 결정하면 Claude가 그 Phase의 변경을 커밋하고 원격(`origin`, GitHub `visionlab`)에 푸시한다. 커밋 메시지는 `Phase NN: <모델 폴더 이름> <요약>` 형식이고, 결과 파일(`docs/results/NN-*.md`)의 결론과 같은 상태여야 한다. Phase 중간에는 사용자가 요청할 때만 커밋·푸시한다. `outputs/`는 커밋하지 않는다(`.gitignore`). force push와 브랜치 삭제는 사용자 확인 없이 하지 않는다.
@@ -84,7 +86,8 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 
 코드 실행은 다음 원칙을 따른다.
 
-- 학습, 평가, 추론, 예제 스크립트는 agy가 Claude가 보낸 명령으로 실행한다. Claude와 codex는 직접 실행하지 않는다. 사용자가 직접 실행할 수도 있다.
+- 학습, 평가, 추론, 예제 스크립트와 테스트(pytest)는 agy가 Claude가 보낸 명령으로 실행한다. Claude와 codex는 직접 실행하지 않는다. 사용자가 직접 실행할 수도 있다.
+- 테스트는 pytest로 작성하고 실행한다(`unittest` 금지, D-21). 명령은 `& $py -m pytest tests\<NN_model>\<file>.py` 형식이고, 테스트 파일에는 `sys.path` 설정을 두지 않는다(`tests/conftest.py`가 한다).
 - Claude는 실행할 명령, 확인할 항목, 출력 위치를 명시해 보낸다. 결과는 agy가 돌려준 출력과 산출물 파일로 판정한다.
 - 문법 확인처럼 학습·추론이 아닌 정적 검사는 Claude가 할 수 있다.
 
@@ -95,7 +98,7 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 | 항목 | 값 |
 | --- | --- |
 | 파이썬 | `C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe`만 쓴다. PATH의 `python`은 Microsoft Store 바로 가기다 |
-| 주요 버전 | torch 2.5.1+cu121, Lightning 2.5.5, anomalib 2.0.0. 바꾸지 않는다 |
+| 주요 버전 | torch 2.5.1+cu121, Lightning 2.5.5, anomalib 2.0.0, torchmetrics 1.8.2, pytest 9.1.1. 바꾸지 않는다 |
 | 자산 | 데이터 `D:\datasets`, 가중치 `D:\backbones`. 인터넷에서 내려받지 않는다 (NFR-3) |
 | 설치 | venv 없이 위 WinPython에 설치한다 |
 
@@ -106,6 +109,7 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 - visionlab 코드는 anomalib을 import·상속하지 않는다. anomalib은 `evaluation/anomalib/`의 레퍼런스 실행과 비교·검증에만 쓴다. `evaluation/visionlab/`도 anomalib을 import하지 않는다 (INTENT, D-15).
 - 배포 모델은 순수 PyTorch만으로 동작한다 (INTENT, D-4).
 - 생성자 인자의 이름·순서·기본값을 anomalib 2.0.0과 맞춘다 (D-5).
+- AUROC, F1 등 metric은 torchmetrics로 계산한다. 직접 구현하지 않고 scikit-learn도 쓰지 않는다(D-20).
 - 필요한 것만 만든다. 빈 폴더나 미리 만든 추상화를 두지 않는다. 파일 배치는 D-15를 따른다.
 - 모델별 파일이 Phase마다 늘어나는 곳은 PLAN의 Phase 번호를 붙인다: `docs/results/NN-<kebab>.md`, `tests/NN_<model>/`, `evaluation/anomalib/models/NN_<model>.yaml`. `src`의 모델 패키지와 `outputs/`에는 번호를 붙이지 않는다 (D-15).
 - 검증은 세 단계다 (INTENT). 1단계 anomalib 레퍼런스 수치, 2단계 native Lightning 이식 결과, 3단계 2단계 가중치를 불러온 순수 PyTorch 추론 결과. 2·3단계는 각각 1단계와 비교한다.

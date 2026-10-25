@@ -82,7 +82,7 @@
 
 ## D-14. 개발 환경과 자산 위치
 
-- **선택**: 개발 환경은 `C:\winpython\WPy64-31180_gpu`의 Python 3.11.8, torch 2.5.1+cu121, torchvision 0.20.1, numpy 2.2.5, Lightning 2.5.5, anomalib 2.0.0(openvino 2025.4.1, jsonargparse 4.39.0)이다. 데이터는 `D:\datasets`, 가중치는 `D:\backbones`를 사용한다. 설치 내역은 `docs/anomalib/anomalib-install-guide.md`를 따른다.
+- **선택**: 개발 환경은 `C:\winpython\WPy64-31180_gpu`의 Python 3.11.8, torch 2.5.1+cu121, torchvision 0.20.1, numpy 2.2.5, Lightning 2.5.5, anomalib 2.0.0(openvino 2025.4.1, jsonargparse 4.39.0), torchmetrics 1.8.2, pytest 9.1.1이다. 데이터는 `D:\datasets`, 가중치는 `D:\backbones`를 사용한다. 설치 내역은 `docs/anomalib/anomalib-install-guide.md`를 따른다.
 - **근거**: 기존 PyTorch·CUDA를 유지한 채 설치했고 기존 패키지 변경은 0건이다. openvino 2026 이상은 `openvino.runtime`이 없고, jsonargparse 4.40 이상은 anomalib 2.0.0 CLI가 실패한다.
 - **배제한 대안**: 원 문서 환경(torch 2.2.1+cu118, numpy 1.26.4)으로 다운그레이드. `E:\datasets`·`E:\backbones` 경로.
 
@@ -102,8 +102,9 @@ visionlab/                                      # project root
 │   ├── anomalib/                               # imports anomalib
 │   │   ├── data/                               # shared data yaml (mvtec.yaml, visa.yaml)
 │   │   ├── models/                             # shared model yaml (NN_<name>.yaml), per-Phase reference
-│   │   ├── 00_compare_data.py                  # Phase 0, visionlab data vs anomalib data (FR-17, D-13)
 │   │   ├── anomalib_run.py                     # AnomalibCLI entry point, reference runs
+│   │   ├── compare_data.py                     # visionlab data vs anomalib data, --data (FR-17, D-13)
+│   │   ├── compare_history.py                  # epoch-wise train_loss_epoch vs reference, --reference --native
 │   │   ├── compare_outputs.py                  # raw output vs anomalib, --model (FR-5, diagnosis)
 │   │   ├── default.yaml                        # shared seed, output root, trainer
 │   │   ├── local_data.py                       # LocalMVTecAD, LocalVisa
@@ -115,7 +116,8 @@ visionlab/                                      # project root
 ├── notebooks/                                  # Jupyter notebooks
 ├── outputs/                                    # run outputs, excluded from git
 ├── specs/                                      # INTENT, DECISIONS, SPEC, PLAN
-├── tests/                                      # visionlab test scripts (FR·NFR checks), run directly
+├── tests/                                      # visionlab pytest tests (FR·NFR checks), run with pytest (D-21)
+│   ├── conftest.py                             # adds <root>/src to sys.path
 │   ├── 00_dataset/
 │   │   └── test_data.py                        # FR-1~3
 │   ├── 01_stfpm/
@@ -190,15 +192,16 @@ visionlab/                                      # project root
 - **배제한 대안**: `models/common`(D-11). 프로젝트 루트 바로 아래의 Python 파일(평가 스크립트는 `evaluation/`에 둔다). 모델마다 `NN_train_<model>.py`처럼 Phase별 실행 스크립트를 따로 두는 방식(18개 모델이면 36개가 되고 같은 절차가 반복된다). 평가 코드를 `examples/`에 두는 방식(예제와 정식 평가 자료가 섞인다). 평가 코드를 `tests/`에 두는 방식(장시간 학습과 단위 테스트가 섞이고 tests의 anomalib 미사용 원칙과 충돌한다). 테스트 파일 이름에 Phase 번호를 접두사로 붙이는 방식(`test_01_stfpm_model.py`, 한 폴더에 18 Phase x 여러 파일이 섞인다). `src`의 모델 패키지에 번호를 붙이는 방식(import 이름이 식별자여야 하고 구현 순서가 바뀌면 코드 이름이 바뀐다). 모든 task 폴더와 하위 폴더를 미리 생성. 순수 파일과 Lightning 연결을 한 파일에 섞는 방식. `pyproject.toml`·`pip install -e .` 개발 설치. 실행 전 `PYTHONPATH` 환경변수 지정. `-m` 모듈 실행.
 `outputs/`는 git에서 제외한다(`.gitignore`). anomalib을 import하는 비교·테스트 코드는 `evaluation/anomalib/`에만 두고 `src/visionlab`에서 참조하지 않는다(D-3·INTENT). `evaluation/anomalib/`에는 레퍼런스 실행 진입점(`anomalib_run.py`는 `AnomalibCLI`), 공유 yaml, 공통 설정 `local_setup.py`(오프라인 설정, timm 이름의 로컬 가중치 연결, Windows 실행 폴더 처리), `local_data.py`의 `LocalMVTecAD`·`LocalVisa`(D-17), `local_models.py`의 로컬 자산 모델, visionlab 데이터·출력을 anomalib과 대조하는 비교 스크립트(FR-17, FR-5)를 둔다.
 
-패키징 설정(`pyproject.toml` 등)과 `pip install -e .` 개발 설치는 사용하지 않는다. 테스트와 실행은 사용자가 PowerShell에서 WinPython의 전체 경로로 직접 실행한다.
+패키징 설정(`pyproject.toml` 등)과 `pip install -e .` 개발 설치는 사용하지 않는다. 실행 스크립트는 PowerShell에서 WinPython의 전체 경로로 실행하고, 테스트는 같은 파이썬의 pytest로 실행한다(D-21).
 
 ```powershell
 C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe <file>.py --<option>
+C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_model>\<file>.py
 ```
 
-`evaluation/`·`tests/`의 스크립트는 첫머리에서 `<root>/src`를 `sys.path`에 추가한 뒤 `visionlab`을 import한다. visionlab 자체 테스트 스크립트는 루트 `tests/`에 둔다. `tests/`는 anomalib을 import하지 않는다.
+`evaluation/`의 스크립트는 첫머리에서 `<root>/src`를 `sys.path`에 추가한 뒤 `visionlab`을 import한다. `tests/`는 `tests/conftest.py`가 같은 일을 하므로 테스트 파일에는 `sys.path` 설정을 두지 않는다. visionlab 자체 테스트는 루트 `tests/`에 둔다. `tests/`는 anomalib을 import하지 않는다.
 
-스크립트 이름 규칙은 다음과 같다. Phase에 묶인 일회성 스크립트(데이터 대조 등)는 `NN_<단계>.py`이고 `NN`은 PLAN의 Phase 번호다. 모델 Phase 전체에서 쓰는 공용 진입점은 번호 없이 `anomalib_run.py`, `compare_outputs.py`, `train.py`, `predict.py`로 두고 모델은 yaml 또는 `--model` 인자로 고른다. 공용 모듈은 `_` 접두사를 붙이되, `evaluation/anomalib/`의 공용 모듈은 yaml의 `class_path`로 import되므로 `local_` 접두사를 쓴다. 모델별 파일이 Phase마다 늘어나는 곳은 Phase 번호(두 자리)를 붙인다. `tests/`는 `tests/NN_<모델 폴더 이름>/test_*.py`이고 여러 Phase에 걸친 테스트는 `tests/common/`에 둔다. `evaluation/anomalib/models/`는 `NN_<모델 폴더 이름>.yaml`이다. 번호는 PLAN의 대응 표가 유일한 원본이다. `src/visionlab/.../models/<model>/`(Python 패키지 이름)과 `outputs/`(anomalib 출력 규칙)에는 번호를 붙이지 않는다. `tests/`는 `evaluation/`과 달리 anomalib을 import하지 않는다. anomalib을 import하는 스크립트만 `evaluation/anomalib/`에 두고, 나머지 평가 스크립트는 `evaluation/visionlab/`에 둔다. CLI는 `-m` 실행 대신 `evaluation/visionlab/train.py`가 `sys.path`를 설정한 뒤 `trainers/lightning_cli.py`의 `LitCLI`를 호출한다. 실행 결과는 `outputs/`에 저장한다.
+스크립트 이름 규칙은 다음과 같다. Phase 하나에만 쓰는 일회성 스크립트는 `NN_<단계>.py`이고 `NN`은 PLAN의 Phase 번호다(현재 해당 파일은 없다. 데이터 대조는 이후 Phase에서도 다시 쓰므로 `compare_data.py`로 번호 없이 둔다, 사용자 결정 2026-10-25). 여러 Phase에서 쓰는 공용 진입점은 번호 없이 `anomalib_run.py`, `compare_data.py`, `compare_history.py`, `compare_outputs.py`, `train.py`, `predict.py`로 두고 모델은 yaml 또는 `--model` 인자로 고른다. 공용 모듈은 `_` 접두사를 붙이되, `evaluation/anomalib/`의 공용 모듈은 yaml의 `class_path`로 import되므로 `local_` 접두사를 쓴다. 모델별 파일이 Phase마다 늘어나는 곳은 Phase 번호(두 자리)를 붙인다. `tests/`는 `tests/NN_<모델 폴더 이름>/test_*.py`이고 여러 Phase에 걸친 테스트는 `tests/common/`에 둔다. `evaluation/anomalib/models/`는 `NN_<모델 폴더 이름>.yaml`이다. 번호는 PLAN의 대응 표가 유일한 원본이다. `src/visionlab/.../models/<model>/`(Python 패키지 이름)과 `outputs/`(anomalib 출력 규칙)에는 번호를 붙이지 않는다. `tests/`는 `evaluation/`과 달리 anomalib을 import하지 않는다. anomalib을 import하는 스크립트만 `evaluation/anomalib/`에 두고, 나머지 평가 스크립트는 `evaluation/visionlab/`에 둔다. CLI는 `-m` 실행 대신 `evaluation/visionlab/train.py`가 `sys.path`를 설정한 뒤 `trainers/lightning_cli.py`의 `LitCLI`를 호출한다. 실행 결과는 `outputs/`에 저장한다.
 
 ## D-16. Phase 순서: 모델별 레퍼런스 확보, 이식, 비교
 
@@ -222,3 +225,27 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe <file>.py --<option>
 - **예외**: 원본 모델 패키지의 `__init__.py`는 `lightning_model`을 import한다(예: `from .lightning_model import Stfpm`). 그대로 두면 순수 모델(`model.py`)을 import할 때도 Lightning이 필요해 순수 PyTorch 배포(INTENT, NFR-2)가 깨지므로, `__init__.py`는 Lightning 모델을 import하지 않도록 고친다(순수 모델만 노출하거나 비운다).
 - **근거**: 원본과 이식본을 파일 단위로 나란히 대조할 수 있어, 적대적 검증과 수치 불일치의 원인 추적이 쉽다. 알고리즘을 다시 쓰면서 생기는 차이를 막는다.
 - **배제한 대안**: 모델을 visionlab 스타일로 새로 작성하는 방식. `components/` 전체를 한 번에 복사하는 방식. models 밖의 anomalib 부품까지 복사해 의존성을 걷어 내는 방식.
+
+## D-19. pretrained 가중치는 LitModel이 주입한다
+
+- **선택**: 순수 모델(`model.py`)의 생성자는 pretrained 가중치 파일을 읽거나 내려받지 않는다. 생성 시 pretrained로 만들던 부분(STFPM의 teacher 등)은 `pre_trained=False`로 구조만 만든다. native `XXXLitModel.__init__`이 생성자 인자를 늘리지 않고 루트 `paths.toml`의 `[backbones]`에 적힌 로컬 파일을 그 부분에 불러온다. 파일이 없으면 무작위 대체 없이 `FileNotFoundError`를 낸다(NFR-3). 학습하지 않는 teacher도 `state_dict`에 포함되므로 배포 artifact와 checkpoint에 들어간다.
+- **적용 범위**: Phase 1 STFPM부터 적용한다. 다른 모델은 그 Phase의 모델 노트에서 생성자가 pretrained를 읽는지 확인하고, 읽으면 같은 방식을 쓴다. EfficientAD teacher처럼 `paths.toml`의 timm 이름 키로 표현되지 않는 자산은 그 Phase에서 주입 경로를 따로 정한다.
+- **D-12와의 관계**: `paths.toml`의 `[backbones]` 형식(timm 모델 이름 키, 로컬 가중치 파일 값)은 그대로 쓴다. 실행 시작 시 timm 이름을 로컬 로더로 바꾸는 방식은 `evaluation/anomalib/local_setup.py`(레퍼런스 실행)에만 남기고, visionlab은 쓰지 않는다.
+- **D-5, D-18과의 관계**: `XXXLitModel` 생성자 인자의 이름·순서·기본값은 anomalib 2.0.0과 같다(D-5). 원본 알고리즘(연산, loss, anomaly map, 학습 hook)은 바꾸지 않으며, 바뀌는 것은 pretrained 로딩 위치뿐이다. D-18의 "의존성 제거 외 변경 없음"에 대한 의도된 예외이며, 해당 줄은 이식 파일 주석과 결과 파일의 "원본과 다르게 구현한 곳"에 적는다(NFR-5).
+- **근거**: 배포 머신에는 학습된 checkpoint만 있고 `D:\backbones`가 없다. 생성자가 pretrained를 읽으면 순수 PyTorch 배포가 불가능하다(INTENT). 생성 후 주입하면 checkpoint 평가·재개에서 불필요한 pretrained 읽기도 없어진다. 주입은 한 줄이고 `state_dict`로 덮어쓰인 결과는 같다.
+- **배제한 대안**: `weights_file` 같은 인자를 LitModel 생성자에 추가하는 방식(D-5, FR-6 위반). timm 이름을 실행 시작 시 교체하는 방식(순수 모델 생성자가 파일을 읽어 배포 요구와 충돌). pretrained 파일이 있으면 읽고 없으면 건너뛰는 방식(실행 결과가 파일 유무로 조용히 바뀐다).
+
+## D-20. 평가 metric은 torchmetrics를 사용한다
+
+- **선택**: `common/metric.py`와 PostProcessor의 F1 임계값 계산은 anomalib 2.0.0과 같은 torchmetrics 클래스를 사용한다. AUROC는 `BinaryROC`와 `torchmetrics.utilities.compute.auc`, F1은 `BinaryF1Score`, F1 기반 임계값은 `BinaryPrecisionRecallCurve`다(anomalib `metrics/auroc.py`, `f1_score.py`, `threshold/f1_adaptive_threshold.py`를 읽고 같은 호출을 쓴다). 계산 불가 시 사유를 남기는 동작(FR-10)과 valid·test 상태 분리는 visionlab 객체가 맡고, 계산 자체는 torchmetrics에 맡긴다.
+- **적용 범위**: Phase 1 STFPM부터 모든 Phase에 적용한다. 순수 파일(`common/metric.py`)이 torchmetrics를 import하지만 torchmetrics는 Lightning을 import하지 않으므로 NFR-2는 유지된다. torchmetrics는 `src/visionlab`의 허용된 외부 의존이다. 다른 metric 라이브러리(scikit-learn 등)는 쓰지 않는다.
+- **근거**: anomalib 레퍼런스가 같은 torchmetrics 연산을 쓰므로 직접 구현보다 수치 차이의 원인이 줄고 검증 범위(동점 처리, 곡선 보간)가 작아진다. 사용자 결정(2026-10-25)이다.
+- **배제한 대안**: 순수 torch로 AUROC, F1을 직접 구현하는 방식(Phase 1 첫 구현, 일치 검증 대상이 늘고 유지 비용이 든다). scikit-learn 사용(의존이 늘고 anomalib과 호출이 다르다).
+
+## D-21. 테스트는 pytest로 작성하고 실행한다
+
+- **선택**: `tests/`의 테스트는 pytest 스타일(함수 `test_*`, `assert`, fixture, `pytest.raises`, `monkeypatch`, `tmp_path`)로 작성하고 `python.exe -m pytest <경로>`로 실행한다. `unittest`는 쓰지 않는다. `tests/conftest.py`가 `<root>/src`를 `sys.path`에 추가하며 설정 파일(`pyproject.toml`, `pytest.ini`)은 두지 않는다. import 차단을 확인하는 테스트(NFR-1, NFR-2, FR-14, FR-19, FR-22)는 같은 프로세스에서 모듈 캐시 때문에 틀릴 수 있으므로 subprocess로 새 인터프리터를 띄워 확인한다.
+- **적용 범위**: Phase 0 테스트를 포함해 모든 Phase의 `tests/`에 적용한다. 새 Phase의 테스트도 pytest로 쓴다. `evaluation/`의 실행·비교 스크립트(`train.py`, `predict.py`, `compare_*.py`)는 테스트가 아니므로 pytest 대상이 아니고 D-15의 방식으로 실행한다.
+- **D-15와의 관계**: D-15가 배제한 `-m` 모듈 실행은 실행 스크립트(CLI)에 대한 것이고, 테스트에 한해 `-m pytest`를 쓴다.
+- **근거**: assert 재작성과 fixture로 테스트가 짧아지고, 실패 출력이 읽기 쉽다. 사용자 결정(2026-10-25)이다.
+- **배제한 대안**: `unittest`(Phase 0, Phase 1 첫 구현). 테스트 파일을 `python <file>.py`로 직접 실행하는 방식. `pyproject.toml`·`pytest.ini` 설정 파일(D-15의 무설정 원칙).

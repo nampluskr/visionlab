@@ -1,0 +1,12 @@
+# src/visionlab/anomaly_detection/configs/data/visa.yaml: existing prepared VisA copy and reference-equivalent splits
+data:
+  class_path: visionlab.anomaly_detection.data.visa.lightning_data.VisALitData
+  init_args:
+    root: D:/datasets/visa_anomalib
+    category: candle
+    train_batch_size: 8
+    eval_batch_size: 8
+    num_workers: 0
+    val_split_mode: from_test
+    val_split_ratio: 0.4
+    seed: 42

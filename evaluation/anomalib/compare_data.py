@@ -1,4 +1,4 @@
-# evaluation/anomalib/00_compare_data.py: compare native datasets with the installed anomalib reference
+# evaluation/anomalib/compare_data.py: compare native datasets with the installed anomalib reference
 
 import argparse
 import hashlib

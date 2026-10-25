@@ -1,0 +1,2 @@
+# src/visionlab/anomaly_detection/configs/default.yaml: reproducible native execution seed
+seed_everything: 42
