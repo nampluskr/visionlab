@@ -139,3 +139,17 @@ def test_efficient_ad_config_merging_and_output_name(tmp_path, monkeypatch):
     assert cli.model.model_size.value == "small" and cli.model.visualizer is None
     assert cli.model.pre_processor.mean is None
     assert cli.trainer.default_root_dir.endswith(os.path.join("efficient_ad", "mvtec_bottle", "v0"))
+
+
+def test_padim_config_merging_and_output_name(tmp_path, cli_assets):
+    """Load PaDiM after the shared data config and retain its fixed fitting epoch and package name."""
+    cli = LitCLI(args=["--data", "mvtec", "--model", "padim", "--trainer.max_epochs", "5",
+                       "--trainer.num_sanity_val_steps", "2", "--trainer.val_check_interval", "0.5",
+                       "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                       "--trainer.devices", "1", "--trainer.logger", "false"], run=False)
+    assert cli.trainer.max_epochs == 1 and cli.trainer.num_sanity_val_steps == 0
+    assert cli.trainer.val_check_interval == 1.0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.model.n_features == 100 and cli.model.visualizer is None
+    assert cli.model.pre_trained is True
+    assert cli.trainer.default_root_dir.endswith(os.path.join("padim", "mvtec_bottle", "v0"))

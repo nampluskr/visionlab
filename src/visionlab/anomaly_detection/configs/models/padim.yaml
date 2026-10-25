@@ -1,0 +1,16 @@
+# src/visionlab/anomaly_detection/configs/models/padim.yaml: local PaDiM model and fixed fitting epoch
+# Pass --data <name> before --model padim.
+model:
+  class_path: visionlab.anomaly_detection.models.padim.lightning_model.PadimLitModel
+  init_args:
+    backbone: resnet18
+    layers: [layer1, layer2, layer3]
+    pre_trained: true
+    n_features: null
+    visualizer: false
+
+# PaDiM pins one fitting epoch, an exception to the shared ten-epoch budget.
+trainer:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+  val_check_interval: 1.0

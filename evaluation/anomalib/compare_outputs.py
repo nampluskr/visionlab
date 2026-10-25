@@ -14,13 +14,15 @@ import argparse
 import inspect
 import json
 import math
+import random
 
 import torch
 import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import EfficientAd, Stfpm
+from anomalib.models import EfficientAd, Padim, Stfpm
+from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
 
 from visionlab.anomaly_detection.common.metric import AUROC, F1
@@ -32,6 +34,8 @@ from visionlab.anomaly_detection.models.stfpm.lightning_model import StfpmLitMod
 from visionlab.anomaly_detection.models.stfpm.model import STFPMModel
 from visionlab.anomaly_detection.models.efficient_ad.lightning_model import EfficientAdLitModel
 from visionlab.anomaly_detection.models.efficient_ad.model import EfficientAdModel
+from visionlab.anomaly_detection.models.padim.lightning_model import PadimLitModel
+from visionlab.anomaly_detection.models.padim.model import PadimModel
 from visionlab.utils.io import file_sha256
 from local_models import LocalEfficientAd
 
@@ -40,6 +44,8 @@ ATOL = 1e-5
 METRIC_ATOL = 1e-6
 EFFICIENT_AD_RTOL = 1e-5
 EFFICIENT_AD_ATOL = 1e-6
+PADIM_RTOL = 1e-5
+PADIM_ATOL = 1e-6
 
 
 def signature_fields(model_class):
@@ -99,7 +105,7 @@ def compare_forwards(checks, reference, native, data, samples):
 
 
 def compare_processing(checks):
-    """Compare visionlab adapters against anomalib metric classes on identical CPU data."""
+    """Compare metric adapters on equivalent score ordering and post-processing on identical CPU data."""
     generator = torch.Generator().manual_seed(42)
     scores = torch.randint(0, 257, (262144,), generator=generator).float() / 256
     labels = torch.randint(0, 2, scores.shape, generator=generator)
@@ -112,7 +118,8 @@ def compare_processing(checks):
         metric.update(prediction, labels)
         actual = metric.compute()
         metric_batch = ImageBatch(image=torch.zeros(scores.numel(), 3, 1, 1), gt_label=labels)
-        setattr(metric_batch, field, prediction)
+        # Keep reference AUROC inputs in [0, 1] to avoid its sigmoid collapsing raw-score ranks.
+        setattr(metric_batch, field, scores if name == "AUROC raw" else prediction)
         reference_metric.update(metric_batch)
         expected = reference_metric.compute().item()
         record_check(checks, f"metrics {name}", abs(actual - expected) <= METRIC_ATOL,
@@ -232,18 +239,115 @@ def compare_efficient_ad(checks, samples):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_padim_forwards(checks, reference, native, data, samples):
+    """Compare PaDiM maps, distances and blur on actual normalized 256-pixel images."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+        pairs = [("pred_score", expected.pred_score, actual.pred_score),
+                 ("anomaly_map", expected.anomaly_map, actual.anomaly_map)]
+        reference_embedding = reference.generate_embedding(reference.feature_extractor(images))
+        native_embedding = native.generate_embedding(native.feature_extractor(images))
+        expected_distance = reference.anomaly_map_generator.compute_distance(
+            reference_embedding, [reference.gaussian.mean, reference.gaussian.inv_covariance])
+        actual_distance = native.anomaly_map_generator.compute_distance(
+            native_embedding, [native.gaussian.mean, native.gaussian.inv_covariance])
+        pairs.append(("compute_distance", expected_distance, actual_distance))
+        blur_input = reference.anomaly_map_generator.up_sample(expected_distance, (256, 256))
+        pairs.append(("GaussianBlur2d", reference.anomaly_map_generator.blur(blur_input),
+                      native.anomaly_map_generator.blur(blur_input)))
+    for name, left, right in pairs:
+        compare_tensor(checks, f"FR-5 {data} {name}", left, right, rtol=PADIM_RTOL, atol=PADIM_ATOL)
+
+
+def compare_padim(checks, samples, reference_checkpoint):
+    """Compare PaDiM constructors, local backbone, seeded indices and shared fitted states."""
+    record_check(checks, "FR-6 constructor signature", signature_fields(Padim) == signature_fields(PadimLitModel),
+                 {"reference": signature_fields(Padim), "native": signature_fields(PadimLitModel)})
+    random_state = random.getstate()
+    try:
+        random.seed(42)
+        reference = Padim(backbone="resnet18", pre_trained=True, pre_processor=False,
+                          post_processor=False, evaluator=False, visualizer=False)
+        random.seed(42)
+        native = PadimLitModel(backbone="resnet18", pre_trained=True, pre_processor=False,
+                               post_processor=False, evaluator=False, visualizer=False)
+    finally:
+        random.setstate(random_state)
+    expected = reference.model.feature_extractor.state_dict()
+    actual = native.model.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    record_check(checks, "seeded idx", torch.equal(reference.model.idx, native.model.idx),
+                 {"seed": 42, "reference": reference.model.idx.tolist(), "native": native.model.idx.tolist()})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        channels = state["idx"].numel()
+    else:
+        state = reference.model.state_dict()
+        channels = reference.model.n_features
+    pure_reference = ReferencePadimModel(backbone="resnet18", pre_trained=False, n_features=channels)
+    pure_native = PadimModel(backbone="resnet18", pre_trained=False, n_features=channels)
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    if reference_checkpoint:
+        record_check(checks, "FR-5 reference checkpoint strict restore", True,
+                     {"path": os.path.abspath(reference_checkpoint), "sha256": file_sha256(reference_checkpoint)})
+    else:
+        embedding = torch.randn(8, channels, 64, 64, generator=torch.Generator().manual_seed(42))
+        expected_stats = pure_reference.gaussian.fit(embedding)
+        actual_stats = pure_native.gaussian.fit(embedding)
+        for name, left, right in zip(("mean", "inv_covariance"), expected_stats, actual_stats, strict=True):
+            compare_tensor(checks, f"FR-5 synthetic {name}", left, right, rtol=PADIM_RTOL, atol=PADIM_ATOL)
+    for data in ("mvtec", "visa"):
+        try:
+            compare_padim_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim"), required=True)
+    parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
     if args.samples < 1:
         parser.error("--samples must be positive")
     checks = []
     rtol, atol = (EFFICIENT_AD_RTOL, EFFICIENT_AD_ATOL) if args.model == "efficient_ad" else (RTOL, ATOL)
+    if args.model == "padim":
+        rtol, atol = PADIM_RTOL, PADIM_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "efficient_ad":
+    if args.model == "padim":
+        try:
+            compare_padim(checks, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "efficient_ad":
         try:
             compare_efficient_ad(checks, args.samples)
         except Exception as error:

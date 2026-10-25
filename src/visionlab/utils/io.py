@@ -126,7 +126,7 @@ def load_export(path):
     required = {"format_version", "model_name", "model_args", "model_state", "pre_processor", "post_processor"}
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("Invalid model export fields")
-    if payload["format_version"] != 1 or payload["model_name"] not in ("stfpm", "efficient_ad"):
+    if payload["format_version"] != 1 or payload["model_name"] not in ("stfpm", "efficient_ad", "padim"):
         raise ValueError("Unsupported model export format")
     return payload
 
@@ -141,7 +141,8 @@ def write_run_info(run_dir, config, datamodule, teacher_path, seed, checkpoint_p
         "path": os.path.abspath(checkpoint_path), "sha256": file_sha256(checkpoint_path),
     }
     record = {"config": config, "splits": splits, "seed": seed,
-              "teacher_weights": {"path": os.path.abspath(teacher_path), "sha256": file_sha256(teacher_path)},
+              "teacher_weights": None if teacher_path is None else {
+                  "path": os.path.abspath(teacher_path), "sha256": file_sha256(teacher_path)},
               "checkpoint": checkpoint}
     os.makedirs(run_dir, exist_ok=True)
     with open(os.path.join(run_dir, "run.json"), "w", encoding="utf-8", newline="\n") as stream:

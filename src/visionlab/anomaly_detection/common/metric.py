@@ -34,7 +34,7 @@ def _undefined_reason(positives, negatives):
 
 
 class AUROC:
-    """Compute the reference ROC area on CPU and report missing target classes."""
+    """Compute rank-preserving ROC area on CPU and report missing target classes."""
 
     def __init__(self):
         self.metric = BinaryROC().cpu()
@@ -43,7 +43,8 @@ class AUROC:
     def update(self, prediction, target):
         prediction, target = _binary_inputs(prediction, target)
         if prediction.numel():
-            self.metric.update(prediction.float() if not prediction.is_floating_point() else prediction, target.long())
+            self.predictions.append(prediction)
+            self.targets.append(target)
         self.positives += int(target.sum())
         self.negatives += target.numel() - int(target.sum())
         self.reason = None
@@ -52,11 +53,18 @@ class AUROC:
         self.reason = _undefined_reason(self.positives, self.negatives)
         if self.reason is not None:
             return float("nan")
+        self.metric = BinaryROC().cpu()
+        # Preserve global ordering and exact ties without BinaryROC's saturating sigmoid.
+        unique, ranks = torch.unique(torch.cat(self.predictions), sorted=True, return_inverse=True)
+        ranks = ranks.to(dtype=torch.float64).div_(max(unique.numel() - 1, 1))
+        self.metric.update(ranks, torch.cat(self.targets).long())
         fpr, tpr, _ = self.metric.compute()
         return auc(fpr, tpr, reorder=True).item()
 
     def reset(self):
         self.metric.reset()
+        self.predictions = []
+        self.targets = []
         self.positives = 0
         self.negatives = 0
         self.reason = None
