@@ -114,4 +114,4 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 - 모델별 파일이 Phase마다 늘어나는 곳은 PLAN의 Phase 번호를 붙인다: `docs/results/NN-<kebab>.md`, `tests/NN_<model>/`, `evaluation/anomalib/models/NN_<model>.yaml`. `src`의 모델 패키지와 `outputs/`에는 번호를 붙이지 않는다 (D-15).
 - 검증은 세 단계다 (INTENT). 1단계 anomalib 레퍼런스 수치, 2단계 native Lightning 이식 결과, 3단계 2단계 가중치를 불러온 순수 PyTorch 추론 결과. 2·3단계는 각각 1단계와 비교한다.
 - 검증은 metric 수치 비교로 한다. 범주별 Image·Pixel AUROC 차이가 각각 0.01 이내여야 한다 (PLAN 검증 방식).
-- 데이터·가중치 경로는 yaml에 직접 적고, 루트 `paths.toml`은 timm 백본 이름의 로컬 가중치(`[backbones]`)만 둔다 (D-12).
+- 데이터·가중치 경로는 yaml에 직접 적고, 루트 `paths.toml`은 timm 백본 이름의 로컬 가중치(`[backbones]`)와 timm이 아닌 teacher의 로컬 가중치(`[teachers]`)만 둔다 (D-12).

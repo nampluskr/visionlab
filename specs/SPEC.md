@@ -23,12 +23,12 @@
 | FR-15 | EfficientAD는 teacher 통계, Imagenette penalty, valid quantile 보정, 학습 batch 1로 동작한다 | Hook별 상태 확인, 재개 시 teacher·통계 미초기화 확인 |
 | FR-16 | STFPM의 선택적 Tiler는 1024 입력·256 타일에서 이미지당 16타일을 만들고 anomaly map은 1024 해상도다 | shape 테스트 |
 | FR-17 | Dataset·DataModule의 파일·라벨·mask·split·최종 입력을 anomalib과 대조한다 | 데이터 검증 ID와 결과 기록 |
-| FR-18 | 같은 manifest·자산·학습 예산으로 MVTec·VisA 범주별 AUROC를 anomalib과 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교 결과 표 기록 |
+| FR-18 | 같은 manifest·자산·학습 예산으로 MVTec·VisA 범주별 AUROC를 anomalib과 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다(D-24). 비교 결과 표 기록 |
 | FR-19 | native Lightning 학습 결과에서 순수 PyTorch 모델 가중치(`state_dict`, 학습하지 않는 teacher 포함)와 추론에 필요한 PreProcessor·PostProcessor 상태를 저장하고, Lightning·anomalib 없이 순수 PyTorch 모델로 불러온다 | Lightning·anomalib import 차단 상태에서 로딩 성공, 저장 전후 같은 입력의 출력 allclose, 저장 파일에 teacher 키 포함 |
-| FR-20 | FR-19로 불러온 순수 PyTorch 모델의 추론으로 MVTec·VisA 범주별 AUROC를 계산해 anomalib 레퍼런스와 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교 결과 표 기록 |
+| FR-20 | FR-19로 불러온 순수 PyTorch 모델의 추론으로 MVTec·VisA 범주별 AUROC를 계산해 anomalib 레퍼런스와 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다(D-24). 비교 결과 표 기록 |
 | FR-21 | `evaluation/anomalib/`은 각 Phase의 anomalib 2.0.0 image 모델(`models/*.yaml` 18개 중 하나)을 로컬 데이터·가중치만으로 실행해 MVTec·VisA 평가 category의 레퍼런스 수치를 얻는다 | 네트워크 차단 실행 성공, 모델·범주별 Image·Pixel AUROC와 학습 예산 기록 |
 | FR-22 | 순수 모델 생성자는 pretrained 파일을 읽거나 내려받지 않는다. 학습하지 않는 부분(STFPM teacher 등)의 가중치도 `state_dict`에 포함된다 | `paths.toml`과 `D:\backbones`에 접근할 수 없고 네트워크를 차단한 상태에서 순수 모델 생성과 `state_dict` 로딩이 성공하는 테스트. 생성자 실행 중 파일 열기 호출이 없음을 확인 |
-| FR-23 | `XXXLitModel`은 생성자 인자를 늘리지 않고 생성 시 `paths.toml [backbones]`의 로컬 파일을 pretrained 부분에 불러온다. 파일이 없으면 `FileNotFoundError`를 내고 무작위 대체를 하지 않는다 | `inspect.signature`가 FR-6과 같음. 파일 누락 시 예외 테스트. 불러온 teacher 가중치가 anomalib 레퍼런스의 teacher 가중치와 같음(`torch.equal` 또는 allclose, 허용 오차는 실험 전에 확정, anomalib을 import하므로 `evaluation/anomalib/`에서 수행) |
+| FR-23 | `XXXLitModel`은 생성자 인자를 늘리지 않고 생성 시 `paths.toml [backbones]`(timm 모델이 아닌 teacher는 `[teachers]`)의 로컬 파일을 pretrained 부분에 불러온다. 파일이 없으면 `FileNotFoundError`를 내고 무작위 대체를 하지 않는다 | `inspect.signature`가 FR-6과 같음. 파일 누락 시 예외 테스트. 불러온 teacher 가중치가 anomalib 레퍼런스의 teacher 가중치와 같음(`torch.equal` 또는 allclose, 허용 오차는 실험 전에 확정, anomalib을 import하므로 `evaluation/anomalib/`에서 수행) |
 | FR-24 | AUROC, F1, F1 기반 임계값은 anomalib 2.0.0과 같은 torchmetrics 클래스(`BinaryROC`와 `auc`, `BinaryF1Score`, `BinaryPrecisionRecallCurve`)로 계산한다(D-20). 순수 파일이 이를 import해도 Lightning 없이 동작한다 | `src/visionlab`에서 torchmetrics 외의 metric 구현(sklearn 등) import 0건. 같은 입력에서 anomalib metric과 값이 같음(`evaluation/anomalib/`에서 대조). Lightning import 차단 상태에서 metric 계산 성공 |
 
 ## 2. 비기능 요구사항

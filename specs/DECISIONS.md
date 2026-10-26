@@ -46,7 +46,7 @@
 
 ## D-8. 후처리 보정과 평가 상태의 분리
 
-- **선택**: PostProcessor의 image/pixel min·max와 F1 기반 임계값은 fit validation 전체에서 수집해 epoch 종료에 확정한다. standalone validate·test·predict는 저장 상태를 읽기만 한다. 정규화는 임계값 중심 변환 `clamp((x-threshold)/(max-min)+0.5, 0, 1)`을 사용한다. raw 예측은 보존하고 후처리 결과를 별도로 둔다. validation은 raw AUROC, test는 raw AUROC와 후처리 F1을 기록한다.
+- **선택**: PostProcessor의 image/pixel min·max와 F1 기반 임계값은 fit validation 전체에서 수집해 epoch 종료에 확정한다. standalone validate·test·predict는 저장 상태를 읽기만 한다. 정규화는 임계값 중심 변환 `clamp((x-threshold)/(max-min)+0.5, 0, 1)`을 사용한다. raw 예측은 보존하고 후처리 결과를 별도로 둔다. validation은 raw AUROC, test는 raw AUROC와 후처리 F1을 기록한다. 여기서 raw AUROC는 점수의 순서를 보존하는 계산이다(D-20).
 - **근거**: 같은 validation에서 고른 임계값의 F1을 독립 평가 결과로 내지 않는다. 테스트 정답으로 보정하지 않는다.
 - **배제한 대안**: 단순 `(score-min)/(max-min)` 정규화. 테스트 배치나 배치별 범위로 재보정. anomalib 2.0.0 EfficientAD처럼 `on_validation_start`에서 무조건 quantile을 갱신하는 방식.
 
@@ -70,7 +70,7 @@
 
 ## D-12. 로컬 경로의 단일 해석
 
-- **선택**: 데이터셋과 가중치 파일의 경로는 실행 설정(yaml)에 절대경로로 직접 적는다(예: `data.init_args.root`, `model.init_args.weights_file`·`teacher_file`). 그 값을 Dataset·특징 추출기·teacher 로더까지 그대로 전달한다. 루트 `paths.toml`에는 `[backbones]`만 두며, 키는 timm 모델 이름이고 값은 로컬 가중치 파일이다. timm 백본은 이름으로 조회되므로 실행 시작 시 이 매핑으로 timm의 같은 이름을 로컬 가중치 로더로 바꾼다.
+- **선택**: 데이터셋과 가중치 파일의 경로는 실행 설정(yaml)에 절대경로로 직접 적는다(예: `data.init_args.root`, `model.init_args.weights_file`·`teacher_file`). 그 값을 Dataset·특징 추출기·teacher 로더까지 그대로 전달한다. 루트 `paths.toml`에는 `[backbones]`와 `[teachers]`를 둔다. `[backbones]`의 키는 timm 모델 이름이고 값은 로컬 가중치 파일이다. `[teachers]`는 timm 모델이 아닌 pretrained teacher(EfficientAD)를 위한 것으로, 키는 `<model>_<model_size>`(예: `efficient_ad_small`)이고 값은 로컬 teacher 가중치 파일이다(Phase 2에서 추가). timm 백본은 이름으로 조회되므로 실행 시작 시 `[backbones]` 매핑으로 timm의 같은 이름을 로컬 가중치 로더로 바꾼다.
 - **근거**: CLI가 저장하는 `config.yaml`에 실제 사용한 경로가 남아 별도 실행 기록 파일 없이도 재현할 수 있다. yaml·CLI의 override가 생성자에 그대로 전달된다. 기존 보조 로더가 내부에서 기본 `paths.toml`을 다시 읽어 CLI 선택과 달라질 수 있었다.
 - **배제한 대안**: `paths.toml`을 모든 경로의 단일 원본으로 두고 `Local*` 생성자가 생략된 인자를 채우는 방식(저장된 config에 실제 경로가 남지 않는다). 로더 내부에서 기본 `paths.toml` 재읽기. `local_<name>` 별칭으로 timm에 등록하는 방식(anomalib의 backbone 이름 검사에 걸린다).
 
@@ -92,7 +92,7 @@
 
 ```text
 visionlab/                                      # project root
-├── paths.toml                                  # [backbones] timm name -> local weights file (D-12)
+├── paths.toml                                  # [backbones] timm name -> local weights, [teachers] <model>_<size> -> teacher file (D-12)
 ├── docs/
 │   ├── anomalib/                               # install guide
 │   ├── results/                                # one file per Phase: NN-<kebab-case>.md, rules in README.md
@@ -229,7 +229,7 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 ## D-19. pretrained 가중치는 LitModel이 주입한다
 
 - **선택**: 순수 모델(`model.py`)의 생성자는 pretrained 가중치 파일을 읽거나 내려받지 않는다. 생성 시 pretrained로 만들던 부분(STFPM의 teacher 등)은 `pre_trained=False`로 구조만 만든다. native `XXXLitModel.__init__`이 생성자 인자를 늘리지 않고 루트 `paths.toml`의 `[backbones]`에 적힌 로컬 파일을 그 부분에 불러온다. 파일이 없으면 무작위 대체 없이 `FileNotFoundError`를 낸다(NFR-3). 학습하지 않는 teacher도 `state_dict`에 포함되므로 배포 artifact와 checkpoint에 들어간다.
-- **적용 범위**: Phase 1 STFPM부터 적용한다. 다른 모델은 그 Phase의 모델 노트에서 생성자가 pretrained를 읽는지 확인하고, 읽으면 같은 방식을 쓴다. EfficientAD teacher처럼 `paths.toml`의 timm 이름 키로 표현되지 않는 자산은 그 Phase에서 주입 경로를 따로 정한다.
+- **적용 범위**: Phase 1 STFPM부터 적용한다. 다른 모델은 그 Phase의 모델 노트에서 생성자가 pretrained를 읽는지 확인하고, 읽으면 같은 방식을 쓴다. EfficientAD teacher처럼 `paths.toml`의 timm 이름 키로 표현되지 않는 자산은 그 Phase에서 주입 경로를 따로 정한다. EfficientAD(Phase 2)는 `paths.toml [teachers]`의 `efficient_ad_<model_size>` 파일을 `EfficientAdLitModel.__init__`이 `strict`로 불러온다(D-12).
 - **D-12와의 관계**: `paths.toml`의 `[backbones]` 형식(timm 모델 이름 키, 로컬 가중치 파일 값)은 그대로 쓴다. 실행 시작 시 timm 이름을 로컬 로더로 바꾸는 방식은 `evaluation/anomalib/local_setup.py`(레퍼런스 실행)에만 남기고, visionlab은 쓰지 않는다.
 - **D-5, D-18과의 관계**: `XXXLitModel` 생성자 인자의 이름·순서·기본값은 anomalib 2.0.0과 같다(D-5). 원본 알고리즘(연산, loss, anomaly map, 학습 hook)은 바꾸지 않으며, 바뀌는 것은 pretrained 로딩 위치뿐이다. D-18의 "의존성 제거 외 변경 없음"에 대한 의도된 예외이며, 해당 줄은 이식 파일 주석과 결과 파일의 "원본과 다르게 구현한 곳"에 적는다(NFR-5).
 - **근거**: 배포 머신에는 학습된 checkpoint만 있고 `D:\backbones`가 없다. 생성자가 pretrained를 읽으면 순수 PyTorch 배포가 불가능하다(INTENT). 생성 후 주입하면 checkpoint 평가·재개에서 불필요한 pretrained 읽기도 없어진다. 주입은 한 줄이고 `state_dict`로 덮어쓰인 결과는 같다.
@@ -239,8 +239,9 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 
 - **선택**: `common/metric.py`와 PostProcessor의 F1 임계값 계산은 anomalib 2.0.0과 같은 torchmetrics 클래스를 사용한다. AUROC는 `BinaryROC`와 `torchmetrics.utilities.compute.auc`, F1은 `BinaryF1Score`, F1 기반 임계값은 `BinaryPrecisionRecallCurve`다(anomalib `metrics/auroc.py`, `f1_score.py`, `threshold/f1_adaptive_threshold.py`를 읽고 같은 호출을 쓴다). 계산 불가 시 사유를 남기는 동작(FR-10)과 valid·test 상태 분리는 visionlab 객체가 맡고, 계산 자체는 torchmetrics에 맡긴다.
 - **적용 범위**: Phase 1 STFPM부터 모든 Phase에 적용한다. 순수 파일(`common/metric.py`)이 torchmetrics를 import하지만 torchmetrics는 Lightning을 import하지 않으므로 NFR-2는 유지된다. torchmetrics는 `src/visionlab`의 허용된 외부 의존이다. 다른 metric 라이브러리(scikit-learn 등)는 쓰지 않는다.
+- **AUROC 입력**: raw 점수를 `BinaryROC`에 그대로 넣지 않는다. 값이 [0, 1]을 벗어나면 `BinaryROC`가 sigmoid를 적용해 큰 점수가 포화되고 동점이 생기므로, 점수를 순서(rank)로 바꿔 [0, 1]에 놓은 뒤 넣는다. 동점은 그대로 유지한다. 이렇게 하면 D-8의 raw AUROC가 점수 규모와 무관해진다(Phase 3에서 드러남).
 - **근거**: anomalib 레퍼런스가 같은 torchmetrics 연산을 쓰므로 직접 구현보다 수치 차이의 원인이 줄고 검증 범위(동점 처리, 곡선 보간)가 작아진다. 사용자 결정(2026-10-25)이다.
-- **배제한 대안**: 순수 torch로 AUROC, F1을 직접 구현하는 방식(Phase 1 첫 구현, 일치 검증 대상이 늘고 유지 비용이 든다). scikit-learn 사용(의존이 늘고 anomalib과 호출이 다르다).
+- **배제한 대안**: 순수 torch로 AUROC, F1을 직접 구현하는 방식(Phase 1 첫 구현, 일치 검증 대상이 늘고 유지 비용이 든다). scikit-learn 사용(의존이 늘고 anomalib과 호출이 다르다). raw 점수를 `BinaryROC`에 그대로 넣는 방식(PaDiM 첫 실행에서 test Image AUROC가 레퍼런스보다 0.035~0.038 낮았다).
 
 ## D-21. 테스트는 pytest로 작성하고 실행한다
 
@@ -249,3 +250,25 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **D-15와의 관계**: D-15가 배제한 `-m` 모듈 실행은 실행 스크립트(CLI)에 대한 것이고, 테스트에 한해 `-m pytest`를 쓴다.
 - **근거**: assert 재작성과 fixture로 테스트가 짧아지고, 실패 출력이 읽기 쉽다. 사용자 결정(2026-10-25)이다.
 - **배제한 대안**: `unittest`(Phase 0, Phase 1 첫 구현). 테스트 파일을 `python <file>.py`로 직접 실행하는 방식. `pyproject.toml`·`pytest.ini` 설정 파일(D-15의 무설정 원칙).
+
+## D-22. 학습 에폭은 10 epoch로 고정하고, 1 epoch 적합 모델은 예외로 한다
+
+- **선택**: 여러 에폭이 필요한 모델은 공유 yaml의 `max_epochs=10`을 레퍼런스와 native에 똑같이 쓰고 모델 yaml로 덮어쓰지 않는다(Phase 2 EfficientAD, 사용자 결정 2026-10-25). 원본이 `trainer_arguments`로 `max_epochs=1`을 고정하는 적합형 모델은 그 값을 따르며, 레퍼런스 yaml과 native yaml 모두 `max_epochs: 1`이다(Phase 3 PaDiM 사용자 결정 2026-10-25, Phase 4 DFM 사용자 결정 2026-10-26).
+- **적용 범위**: 모델이 10이 아닌 여러 에폭을 고정하는 경우(PLAN의 FRE 220 epoch)는 이 결정에 포함되지 않는다. 해당 Phase 시작 전에 사용자가 정한다.
+- **근거**: 원본이 고정한 값을 바꾸면 알고리즘을 바꾸는 것이다(D-18). 레퍼런스와 native가 같은 학습 예산이어야 FR-18 비교가 성립한다.
+- **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다).
+
+## D-23. kornia를 순수 모델의 외부 의존으로 허용한다
+
+- **선택**: PaDiM의 `GaussianBlur2d`는 원본처럼 kornia(0.8.2)를 import한다. 독립 구현하지 않는다(Phase 3, 사용자 결정 2026-10-25).
+- **적용 범위**: kornia에만 해당한다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. kornia는 `src/visionlab`에서 순수 모델 쪽(`model.py`와 `components/`)에만 쓰고, 배포 환경에도 설치되어 있어야 한다.
+- **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다. kornia는 PyTorch 위의 라이브러리이므로 이 결정은 그 범위를 PyTorch 생태계 패키지까지 넓혀 읽는다. INTENT는 고치지 않는다.
+- **근거**: 원본 알고리즘 보존(D-18)과 FR-5 일치 검증의 범위를 줄인다.
+- **배제한 대안**: `GaussianBlur2d`를 순수 torch로 독립 구현하는 방식(검증 대상이 늘고 원본과 어긋날 위험이 있다).
+
+## D-24. 레퍼런스 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다
+
+- **선택**: FR-18, FR-20의 AUROC 비교는 anomalib이 test에서 보고하는 값과 같은 정의로 한다. anomalib의 test AUROC는 PostProcessor로 정규화하고 clamp한 점수로 계산하므로, visionlab도 같은 export의 정규화 점수(D-8의 임계값 중심 변환과 clamp)로 AUROC를 계산해 비교한다. visionlab 자체 지표(D-8, D-20의 raw 순서 보존 AUROC)는 그대로 두고 결과 파일에 참고로 함께 적는다. 두 정의의 값이 0.01 넘게 다르면 그 원인을 결과 파일에 적는다.
+- **근거**: Phase 4 DFM의 visa/candle에서 모델 출력은 같았다(FR-5 최대 차이 0.0, F1 일치). 그런데 raw 값 0.9606과 레퍼런스 0.7487이 0.2119 달랐다. anomalib의 정규화 점수에서 pixel의 97.8%가 0.0으로 clamp되어 동점이 생기기 때문이다. 같은 정의로 비교하면 visionlab 0.748692, 레퍼런스 0.748692로 일치한다. 사용자 결정(2026-10-26)이다.
+- **남은 한계**: 레퍼런스의 raw 값은 구하지 않았다. 사용자가 추가 실행 없이 Phase를 닫기로 했으므로, raw 정의의 비교는 출력 일치(FR-5)와 정규화 값 일치에서 추론한 것이다. 점수 규모가 큰 모델(Phase 5 DFKDE, Phase 9 FRE 등)에서 같은 차이가 반복될 수 있다.
+- **배제한 대안**: raw AUROC를 기준으로 하고 레퍼런스의 raw 값을 따로 구해 비교하는 방식(레퍼런스 평가를 추가로 실행해야 한다). 미충족으로 두고 기준 정의를 바꾸는 방식(차이가 구현이 아니라 지표 정의에서 나오므로 Phase가 막히기만 한다).
