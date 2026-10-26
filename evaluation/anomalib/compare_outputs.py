@@ -15,13 +15,15 @@ import inspect
 import json
 import math
 import random
+from enum import Enum
 
 import torch
 import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Dfm, EfficientAd, Padim, Stfpm
+from anomalib.models import Dfkde, Dfm, EfficientAd, Padim, Stfpm
+from anomalib.models.image.dfkde.torch_model import DfkdeModel as ReferenceDfkdeModel
 from anomalib.models.image.dfm.torch_model import DFMModel as ReferenceDFMModel
 from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
@@ -39,6 +41,8 @@ from visionlab.anomaly_detection.models.padim.lightning_model import PadimLitMod
 from visionlab.anomaly_detection.models.padim.model import PadimModel
 from visionlab.anomaly_detection.models.dfm.lightning_model import DfmLitModel
 from visionlab.anomaly_detection.models.dfm.model import DFMModel
+from visionlab.anomaly_detection.models.dfkde.lightning_model import DfkdeLitModel
+from visionlab.anomaly_detection.models.dfkde.model import DfkdeModel
 from visionlab.utils.io import file_sha256
 from local_models import LocalEfficientAd
 
@@ -51,11 +55,15 @@ PADIM_RTOL = 1e-5
 PADIM_ATOL = 1e-6
 DFM_RTOL = 1e-5
 DFM_ATOL = 1e-6
+DFKDE_RTOL = 1e-5
+DFKDE_ATOL = 1e-6
 
 
-def signature_fields(model_class):
+def signature_fields(model_class, enum_values=False):
     """Compare constructor names, order, kinds and default representations without annotations."""
-    return [{"name": name, "kind": parameter.kind.name, "default": repr(parameter.default)}
+    return [{"name": name, "kind": parameter.kind.name,
+             "default": repr(parameter.default.value if enum_values and isinstance(parameter.default, Enum)
+                             else parameter.default)}
             for name, parameter in inspect.signature(model_class.__init__).parameters.items()]
 
 
@@ -413,10 +421,91 @@ def compare_dfm(checks, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_dfkde_forwards(checks, reference, native, data, samples):
+    """Compare image-only KDE scores on separately cloned normalized real samples."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    compare_tensor(checks, f"FR-5 {data} pred_score", expected.pred_score, actual.pred_score,
+                   rtol=DFKDE_RTOL, atol=DFKDE_ATOL)
+    record_check(checks, f"FR-5 {data} image-only output", expected.anomaly_map is None and actual.anomaly_map is None,
+                 {"reference_anomaly_map_none": expected.anomaly_map is None, "native_anomaly_map_none": actual.anomaly_map is None})
+
+
+def compare_dfkde(checks, samples, reference_checkpoint):
+    """Compare DFKDE signatures, injected backbone and restored or synthetic KDE scores."""
+    expected_signature = signature_fields(Dfkde, enum_values=True)
+    actual_signature = signature_fields(DfkdeLitModel, enum_values=True)
+    record_check(checks, "FR-6 constructor signature", expected_signature == actual_signature,
+                 {"reference": expected_signature, "native": actual_signature})
+    reference = Dfkde(backbone="resnet18", pre_trained=True, pre_processor=False,
+                      post_processor=False, evaluator=False, visualizer=False)
+    native = DfkdeLitModel(backbone="resnet18", pre_trained=True, pre_processor=False,
+                           post_processor=False, evaluator=False, visualizer=False)
+    expected = reference.model.feature_extractor.state_dict()
+    actual = native.model.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    pure_reference = ReferenceDfkdeModel(backbone="resnet18", layers=["layer4"], pre_trained=False)
+    pure_native = DfkdeModel(backbone="resnet18", layers=["layer4"], pre_trained=False)
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+    else:
+        state = reference.model.state_dict()
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    if reference_checkpoint:
+        record_check(checks, "FR-5 reference checkpoint strict restore", True,
+                     {"path": os.path.abspath(reference_checkpoint), "sha256": file_sha256(reference_checkpoint)})
+    else:
+        generator = torch.Generator().manual_seed(42)
+        embeddings = torch.randn(64, 512, generator=generator)
+        left, right = pure_reference.classifier, pure_native.classifier
+        fitted_left, fitted_right = left.fit(embeddings.clone()), right.fit(embeddings.clone())
+        record_check(checks, "FR-5 synthetic KDE fitting", fitted_left and fitted_right,
+                     {"reference": fitted_left, "native": fitted_right})
+        features = torch.randn(8, 512, generator=generator)
+        compare_tensor(checks, "FR-5 synthetic KDE scores", left(features.clone()), right(features.clone()),
+                       rtol=DFKDE_RTOL, atol=DFKDE_ATOL)
+        for name, expected_value, actual_value in (
+            ("max_length", left.max_length, right.max_length),
+            ("kde_model.norm", left.kde_model.norm, right.kde_model.norm),
+        ):
+            compare_tensor(checks, f"FR-5 synthetic {name}", expected_value, actual_value,
+                           rtol=DFKDE_RTOL, atol=DFKDE_ATOL)
+    for data in ("mvtec", "visa"):
+        try:
+            compare_dfkde_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -428,8 +517,15 @@ def main():
         rtol, atol = PADIM_RTOL, PADIM_ATOL
     elif args.model == "dfm":
         rtol, atol = DFM_RTOL, DFM_ATOL
+    elif args.model == "dfkde":
+        rtol, atol = DFKDE_RTOL, DFKDE_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "dfm":
+    if args.model == "dfkde":
+        try:
+            compare_dfkde(checks, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "dfm":
         try:
             compare_dfm(checks, args.samples, args.reference_checkpoint)
         except Exception as error:

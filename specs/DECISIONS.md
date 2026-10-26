@@ -268,7 +268,7 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 
 ## D-24. 레퍼런스 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다
 
-- **선택**: FR-18, FR-20의 AUROC 비교는 anomalib이 test에서 보고하는 값과 같은 정의로 한다. anomalib의 test AUROC는 PostProcessor로 정규화하고 clamp한 점수로 계산하므로, visionlab도 같은 export의 정규화 점수(D-8의 임계값 중심 변환과 clamp)로 AUROC를 계산해 비교한다. visionlab 자체 지표(D-8, D-20의 raw 순서 보존 AUROC)는 그대로 두고 결과 파일에 참고로 함께 적는다. 두 정의의 값이 0.01 넘게 다르면 그 원인을 결과 파일에 적는다.
+- **선택**: FR-18, FR-20의 AUROC 비교는 anomalib이 test에서 보고하는 값과 같은 정의로 한다. anomalib의 test AUROC는 PostProcessor로 정규화하고 clamp한 점수로 계산하므로, visionlab도 같은 export의 정규화 점수(D-8의 임계값 중심 변환과 clamp)로 AUROC를 계산해 비교한다. visionlab 자체 지표(D-8, D-20의 raw 순서 보존 AUROC)는 그대로 두고 결과 파일에 참고로 함께 적는다. 정규화 AUROC는 export 기반 `evaluation/visionlab/predict.py`에서 raw와 함께 기록하며, native `train.py` 로그는 raw만 기록한다(Phase 5 사용자 결정 2026-10-26). 두 정의의 값이 0.01 넘게 다르면 그 원인을 결과 파일에 적는다.
 - **근거**: Phase 4 DFM의 visa/candle에서 모델 출력은 같았다(FR-5 최대 차이 0.0, F1 일치). 그런데 raw 값 0.9606과 레퍼런스 0.7487이 0.2119 달랐다. anomalib의 정규화 점수에서 pixel의 97.8%가 0.0으로 clamp되어 동점이 생기기 때문이다. 같은 정의로 비교하면 visionlab 0.748692, 레퍼런스 0.748692로 일치한다. 사용자 결정(2026-10-26)이다.
 - **남은 한계**: 레퍼런스의 raw 값은 구하지 않았다. 사용자가 추가 실행 없이 Phase를 닫기로 했으므로, raw 정의의 비교는 출력 일치(FR-5)와 정규화 값 일치에서 추론한 것이다. 점수 규모가 큰 모델(Phase 5 DFKDE, Phase 9 FRE 등)에서 같은 차이가 반복될 수 있다.
 - **배제한 대안**: raw AUROC를 기준으로 하고 레퍼런스의 raw 값을 따로 구해 비교하는 방식(레퍼런스 평가를 추가로 실행해야 한다). 미충족으로 두고 기준 정의를 바꾸는 방식(차이가 구현이 아니라 지표 정의에서 나오므로 Phase가 막히기만 한다).

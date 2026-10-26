@@ -176,3 +176,18 @@ def test_dfm_config_merging_and_output_name(tmp_path, monkeypatch):
     assert cli.model.pca_level == 0.97 and cli.model.score_type == "fre" and cli.model.visualizer is None
     assert cli.model.teacher_weights_path == weights
     assert cli.trainer.default_root_dir.endswith(os.path.join("dfm", "mvtec_bottle", "v0"))
+
+
+def test_dfkde_config_merging_and_output_name(tmp_path, cli_assets):
+    """Load image-only DFKDE after data settings and enforce its fixed fitting trainer arguments."""
+    cli = LitCLI(args=["--data", "mvtec", "--model", "dfkde", "--trainer.max_epochs", "5",
+                       "--trainer.num_sanity_val_steps", "2", "--trainer.gradient_clip_val", "5",
+                       "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                       "--trainer.devices", "1", "--trainer.logger", "false"], run=False)
+    assert cli.trainer.max_epochs == 1 and cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.layers == ["layer4"] and cli.model.n_pca_components == 16
+    assert cli.model.max_training_points == 40000 and cli.model.feature_scaling_method.value == "scale"
+    assert cli.model.visualizer is None
+    assert [entry[0] for entry in cli.model.evaluator.test_metrics] == ["image_AUROC", "image_F1Score"]
+    assert cli.trainer.default_root_dir.endswith(os.path.join("dfkde", "mvtec_bottle", "v0"))

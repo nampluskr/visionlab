@@ -1,0 +1,17 @@
+# src/visionlab/anomaly_detection/configs/models/dfkde.yaml: local image-only DFKDE and fixed fitting epoch
+# Pass --data <name> before --model dfkde.
+model:
+  class_path: visionlab.anomaly_detection.models.dfkde.lightning_model.DfkdeLitModel
+  init_args:
+    backbone: resnet18
+    layers: [layer4]
+    pre_trained: true
+    n_pca_components: 16
+    max_training_points: 40000
+    visualizer: false
+
+# DFKDE pins one fitting epoch, an exception to the shared ten-epoch budget (D-22).
+trainer:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

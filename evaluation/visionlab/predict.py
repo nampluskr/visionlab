@@ -44,7 +44,7 @@ def latest_export(model, data, category):
 def main(args=None):
     """Evaluate the configured pure test split and save explicit metric failure reasons."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde"), required=True)
     parser.add_argument("--data", choices=("mvtec", "visa"), required=True)
     parser.add_argument("--export")
     parser.add_argument("--category")
@@ -72,10 +72,13 @@ def main(args=None):
     )
     loader = DataLoader(test_data, batch_size=config["eval_batch_size"], shuffle=False, num_workers=0)
     predictor = Predictor.from_export(path, device="cpu")
+    # Normalized AUROC uses the PostProcessor's threshold-centered, clamped scores.
     metrics = [("image_AUROC", AUROC(), "pred_score", "label"),
                ("pixel_AUROC", AUROC(), "anomaly_map", "mask"),
                ("image_F1Score", F1(), "pred_label", "label"),
-               ("pixel_F1Score", F1(), "pred_mask", "mask")]
+               ("pixel_F1Score", F1(), "pred_mask", "mask"),
+               ("image_AUROC_normalized", AUROC(), "normalized_pred_score", "label"),
+               ("pixel_AUROC_normalized", AUROC(), "normalized_anomaly_map", "mask")]
     for images, target in loader:
         outputs = predictor.predict(images)
         for _, metric, prediction, truth in metrics:

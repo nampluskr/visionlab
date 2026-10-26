@@ -8,6 +8,8 @@ from visionlab.anomaly_detection.models.stfpm.model import STFPMModel
 from visionlab.anomaly_detection.models.efficient_ad.model import EfficientAdModel
 from visionlab.anomaly_detection.models.padim.model import PadimModel
 from visionlab.anomaly_detection.models.dfm.model import DFMModel
+from visionlab.anomaly_detection.models.dfkde.model import DfkdeModel
+from visionlab.anomaly_detection.models.components.classification import FeatureScalingMethod
 from visionlab.utils.io import load_export
 
 
@@ -23,8 +25,12 @@ class Predictor:
     @classmethod
     def from_export(cls, path, device="cpu"):
         exported = load_export(path)
-        models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel, "padim": PadimModel, "dfm": DFMModel}
-        model = models[exported["model_name"]](**exported["model_args"])
+        models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel, "padim": PadimModel,
+                  "dfm": DFMModel, "dfkde": DfkdeModel}
+        model_args = dict(exported["model_args"])
+        if exported["model_name"] == "dfkde":
+            model_args["feature_scaling_method"] = FeatureScalingMethod(model_args["feature_scaling_method"])
+        model = models[exported["model_name"]](**model_args)
         model.load_state_dict(exported["model_state"], strict=True)
         pre_processor = PreProcessor(mean=exported["pre_processor"]["mean"], std=exported["pre_processor"]["std"])
         post_processor = None

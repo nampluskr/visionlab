@@ -9,7 +9,7 @@
 | FR-1 | 순수 `MVTecDataset`·`VisADataset`은 `(image, target)`을 반환한다. image는 float32 `[3,H,W]`·`[0,1]`, 평가 target은 label 0/1, mask int64 `[H,W]`, `sample_id`, `image_path`를 가진다 | 정상·이상 샘플의 shape·dtype·범위·필드 검사 테스트 통과 |
 | FR-2 | `MVTecLitData`·`VisALitData`는 native `LightningDataModule`이며 생성자 인자 이름·순서·기본값이 anomalib 2.0.0의 대응 클래스와 같다 | `inspect.signature` 비교 일치. anomalib을 import하는 비교이므로 `evaluation/anomalib/compare_data.py`에서 수행 |
 | FR-3 | 분할 기본값은 `test_split_mode="from_dir"`, `val_split_mode="same_as_test"`다. `from_test` 명시 시 valid와 test가 겹치지 않고, 고정 seed에서 새 인스턴스도 같은 목록을 만든다. 미구현 모드는 명시적 오류를 낸다 | 파일 목록 교집합·재생성 비교, 미구현 모드 예외 테스트 |
-| FR-4 | 이식한 순수 모델(예: `STFPMModel`·`EfficientAdModel`)의 평가 출력은 score `[B,1]`, anomaly map `[B,1,H,W]`다 | forward shape 테스트 |
+| FR-4 | 이식한 순수 모델(예: `STFPMModel`·`EfficientAdModel`)의 평가 출력은 score `[B,1]`, anomaly map `[B,1,H,W]`다. image metric만 내는 모델(DFKDE, GANomaly)은 anomaly map 없이 score만 낸다 | forward shape 테스트. image 전용 모델은 anomaly map이 없음을 확인 |
 | FR-5 | 같은 state·입력에서 순수 모델의 raw 출력이 anomalib 원본과 일치한다 | score·map의 allclose 결과 기록. 허용 오차는 실험 전에 확정 |
 | FR-6 | 이식한 LightningModule(예: `StfpmLitModel` 인자 6개, `EfficientAdLitModel` 인자 11개, D-18)의 생성자 인자 이름·순서·기본값이 anomalib 2.0.0과 같다 | `inspect.signature` 비교 일치 |
 | FR-7 | PreProcessor·PostProcessor·Evaluator·Visualizer 인자는 `True`·`False`·visionlab 객체를 받고, `None`·잘못된 타입은 오류를 낸다 | 네 경우 각각의 테스트 |
@@ -23,7 +23,7 @@
 | FR-15 | EfficientAD는 teacher 통계, Imagenette penalty, valid quantile 보정, 학습 batch 1로 동작한다 | Hook별 상태 확인, 재개 시 teacher·통계 미초기화 확인 |
 | FR-16 | STFPM의 선택적 Tiler는 1024 입력·256 타일에서 이미지당 16타일을 만들고 anomaly map은 1024 해상도다 | shape 테스트 |
 | FR-17 | Dataset·DataModule의 파일·라벨·mask·split·최종 입력을 anomalib과 대조한다 | 데이터 검증 ID와 결과 기록 |
-| FR-18 | 같은 manifest·자산·학습 예산으로 MVTec·VisA 범주별 AUROC를 anomalib과 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다(D-24). 비교 결과 표 기록 |
+| FR-18 | 같은 manifest·자산·학습 예산으로 MVTec·VisA 범주별 AUROC를 anomalib과 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교는 레퍼런스가 보고하는 값과 같은 정의로 하며, 정규화 AUROC는 export 기반 `predict.py`에서 raw와 함께 기록한다(D-24). 비교 결과 표 기록 |
 | FR-19 | native Lightning 학습 결과에서 순수 PyTorch 모델 가중치(`state_dict`, 학습하지 않는 teacher 포함)와 추론에 필요한 PreProcessor·PostProcessor 상태를 저장하고, Lightning·anomalib 없이 순수 PyTorch 모델로 불러온다 | Lightning·anomalib import 차단 상태에서 로딩 성공, 저장 전후 같은 입력의 출력 allclose, 저장 파일에 teacher 키 포함 |
 | FR-20 | FR-19로 불러온 순수 PyTorch 모델의 추론으로 MVTec·VisA 범주별 AUROC를 계산해 anomalib 레퍼런스와 비교한다 | 범주별 Image AUROC·Pixel AUROC 차이가 각각 0.01 이내. 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다(D-24). 비교 결과 표 기록 |
 | FR-21 | `evaluation/anomalib/`은 각 Phase의 anomalib 2.0.0 image 모델(`models/*.yaml` 18개 중 하나)을 로컬 데이터·가중치만으로 실행해 MVTec·VisA 평가 category의 레퍼런스 수치를 얻는다 | 네트워크 차단 실행 성공, 모델·범주별 Image·Pixel AUROC와 학습 예산 기록 |
