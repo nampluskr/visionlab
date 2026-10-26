@@ -88,6 +88,7 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 
 - 학습, 평가, 추론, 예제 스크립트와 테스트(pytest)는 agy가 Claude가 보낸 명령으로 실행한다. Claude와 codex는 직접 실행하지 않는다. 사용자가 직접 실행할 수도 있다.
 - 테스트는 pytest로 작성하고 실행한다(`unittest` 금지, D-21). 명령은 `& $py -m pytest tests\<NN_model>\<file>.py` 형식이고, 테스트 파일에는 `sys.path` 설정을 두지 않는다(`tests/conftest.py`가 한다).
+- 실행 대상은 그 Phase에서 이식·구현한 모델만이다. 앞 Phase 모델의 회귀 pytest, `compare_outputs`, 재평가는 지시에 넣지 않는다. 공유 파일(`common/`, `utils/io.py` 등)을 고쳐 앞 모델에 영향이 있을 수 있으면 임의로 돌리지 않고 사유와 함께 사용자에게 보고해 판단을 받는다.
 - Claude는 실행할 명령, 확인할 항목, 출력 위치를 명시해 보낸다. 결과는 agy가 돌려준 출력과 산출물 파일로 판정한다.
 - 문법 확인처럼 학습·추론이 아닌 정적 검사는 Claude가 할 수 있다.
 

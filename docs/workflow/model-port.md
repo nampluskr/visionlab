@@ -163,6 +163,8 @@ Claude가 `evaluation/visionlab/train.py`(native Lightning 학습·평가, LitCL
 & $py -m pytest tests\NN_<name>\test_<file>.py 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\<NN>-<step>-<YYMMDD>-<n>.log
 ```
 
+실행 대상은 그 Phase에서 이식·구현한 모델만이다. 앞 Phase 모델의 회귀 pytest, `compare_outputs`, 재평가는 지시에 넣지 않는다. 공유 파일(`common/`, `utils/io.py` 등)을 고쳐 앞 모델에 영향이 있을 수 있으면 임의로 돌리지 않고 사유와 함께 사용자에게 보고해 판단을 받는다.
+
 ### 7.1 agy 지시 양식
 
 ```text

@@ -22,7 +22,7 @@ Phase 0에서 모든 모델이 공유하는 데이터셋을 구현하고 anomali
 | 2 | 레퍼런스 진단·기록 | Claude |
 | 3 | 이식 구현 | Claude가 지시하고 codex가 구현 |
 | 4 | 이식 결과 적대적 검증, 수정 요청 | Claude. 수정 반복은 최대 3회 |
-| 5 | 이식 결과 실행(native Lightning 학습·평가, 순수 PyTorch 추론) | Claude가 명령을 보내고 agy가 실행 |
+| 5 | 이식 결과 실행(native Lightning 학습·평가, 순수 PyTorch 추론). 그 Phase의 모델만 대상으로 한다 | Claude가 명령을 보내고 agy가 실행 |
 | 6 | 수치 판정·기록 | Claude. 기준 미달이면 원인을 진단해 3으로 돌아간다(최대 3회) |
 | 7 | 보고, Phase 종료 결정 | Claude가 보고하고 사용자가 결정 |
 | 8 | 커밋·푸시 | Claude. 종료가 결정되면 그 Phase의 변경을 커밋하고 `origin`에 푸시 |
