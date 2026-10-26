@@ -1,0 +1,18 @@
+# src/visionlab/anomaly_detection/configs/models/fre.yaml: native FRE with a local backbone and the phase budget
+# Pass --data <name> before --model fre.
+model:
+  class_path: visionlab.anomaly_detection.models.fre.lightning_model.FreLitModel
+  init_args:
+    backbone: resnet50
+    layer: layer3
+    pre_trained: true
+    pooling_kernel_size: 2
+    input_dim: 65536
+    latent_dim: 220
+    visualizer: false
+
+# The original pins 220; this phase uses 10 by user decision, matching trainer_arguments.
+trainer:
+  max_epochs: 10
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

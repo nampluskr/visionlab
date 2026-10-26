@@ -266,3 +266,23 @@ def test_cfa_config_merging_and_output_name(tmp_path, monkeypatch, max_epochs):
     assert cli.model.model_args["num_nearest_neighbors"] == cli.model.model_args["num_hard_negative_features"] == 3
     assert cli.model.model_args["radius"] == 1e-5 and cli.model.visualizer is None
     assert cli.trainer.default_root_dir.endswith(os.path.join("cfa", "mvtec_bottle", "v0"))
+
+
+def test_fre_config_merging_and_output_name(tmp_path, cli_assets):
+    """Load FRE defaults and enforce the user-selected fixed ten-epoch budget over CLI overrides."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "fre.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["init_args"]["backbone"] == "resnet50"
+    assert config["model"]["init_args"]["input_dim"] == 65536
+    assert config["model"]["init_args"]["latent_dim"] == 220
+    cli = LitCLI(args=["--data", "mvtec", "--model", "fre", "--model.init_args.backbone", "resnet18",
+                       "--model.init_args.input_dim", "16384", "--model.init_args.latent_dim", "7",
+                       "--trainer.max_epochs", "5", "--trainer.num_sanity_val_steps", "2",
+                       "--trainer.gradient_clip_val", "5", "--trainer.default_root_dir", os.path.join(tmp_path, "runs"),
+                       "--trainer.accelerator", "cpu", "--trainer.devices", "1", "--trainer.logger", "false"], run=False)
+    assert cli.trainer.max_epochs == 10 and cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.layer == "layer3" and cli.model.pooling_kernel_size == 2 and cli.model.visualizer is None
+    assert cli.trainer.default_root_dir.endswith(os.path.join("fre", "mvtec_bottle", "v0"))

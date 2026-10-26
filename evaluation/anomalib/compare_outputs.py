@@ -23,8 +23,9 @@ import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Cfa, Dfkde, Dfm, EfficientAd, Padim, Patchcore, ReverseDistillation, Stfpm
+from anomalib.models import Cfa, Dfkde, Dfm, EfficientAd, Fre, Padim, Patchcore, ReverseDistillation, Stfpm
 from anomalib.models.image.cfa import torch_model as reference_cfa_module
+from anomalib.models.image.fre.torch_model import FREModel as ReferenceFREModel
 from anomalib.models.image.dfkde.torch_model import DfkdeModel as ReferenceDfkdeModel
 from anomalib.models.image.dfm.torch_model import DFMModel as ReferenceDFMModel
 from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
@@ -55,6 +56,8 @@ from visionlab.anomaly_detection.models.reverse_distillation.model import Revers
 from visionlab.anomaly_detection.models.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
 from visionlab.anomaly_detection.models.cfa.lightning_model import CfaLitModel
 from visionlab.anomaly_detection.models.cfa.model import CfaModel
+from visionlab.anomaly_detection.models.fre.lightning_model import FreLitModel
+from visionlab.anomaly_detection.models.fre.model import FREModel
 from visionlab.utils.io import file_sha256
 from local_models import LocalCfa, LocalEfficientAd
 
@@ -75,6 +78,8 @@ REVERSE_DISTILLATION_RTOL = 1e-5
 REVERSE_DISTILLATION_ATOL = 1e-6
 CFA_RTOL = 1e-5
 CFA_ATOL = 1e-6
+FRE_RTOL = 1e-5
+FRE_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -767,11 +772,85 @@ def compare_cfa(checks, information, samples, reference_checkpoint):
                    rtol=CFA_RTOL, atol=CFA_ATOL)
 
 
+def compare_fre_forwards(checks, reference, native, data, samples):
+    """Compare FRE raw outputs on shared normalized 256-pixel real samples."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    compare_tensor(checks, f"FR-5 {data} pred_score", expected.pred_score, actual.pred_score,
+                   rtol=FRE_RTOL, atol=FRE_ATOL)
+    compare_tensor(checks, f"FR-5 {data} anomaly_map", expected.anomaly_map, actual.anomaly_map,
+                   rtol=FRE_RTOL, atol=FRE_ATOL)
+
+
+def compare_fre(checks, information, samples, reference_checkpoint):
+    """Compare FRE signatures, injected backbone, shared forwards and informational tied initialization."""
+    record_check(checks, "FR-6 constructor signature", signature_fields(Fre) == signature_fields(FreLitModel),
+                 {"reference": signature_fields(Fre), "native": signature_fields(FreLitModel)})
+    reference = Fre(backbone="resnet50", pre_trained=True, pre_processor=False,
+                    post_processor=False, evaluator=False, visualizer=False)
+    native = FreLitModel(backbone="resnet50", pre_trained=True, pre_processor=False,
+                         post_processor=False, evaluator=False, visualizer=False)
+    expected, actual = reference.model.feature_extractor.state_dict(), native.model.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = reference.model.state_dict()
+    del reference, native, expected, actual
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        pure_reference = ReferenceFREModel(backbone="resnet50", layer="layer3", input_dim=65536,
+                                           latent_dim=220, pre_trained=False, pooling_kernel_size=2)
+        torch.random.default_generator.manual_seed(42)
+        pure_native = FREModel(backbone="resnet50", layer="layer3", input_dim=65536,
+                               latent_dim=220, pre_trained=False, pooling_kernel_size=2)
+    for name in ("weight", "encoder_bias", "decoder_bias"):
+        entry = {"name": f"seeded initial TiedAE {name}", "informational_only": True, "seed": 42,
+                 "equal": torch.equal(getattr(pure_reference.fre_model, name), getattr(pure_native.fre_model, name))}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "reference random initial state"})
+    del state
+    for data in ("mvtec", "visa"):
+        try:
+            compare_fre_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa"), required=True)
+                                          "reverse_distillation", "cfa", "fre"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -792,8 +871,15 @@ def main():
         rtol, atol = REVERSE_DISTILLATION_RTOL, REVERSE_DISTILLATION_ATOL
     elif args.model == "cfa":
         rtol, atol = CFA_RTOL, CFA_ATOL
+    elif args.model == "fre":
+        rtol, atol = FRE_RTOL, FRE_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "cfa":
+    if args.model == "fre":
+        try:
+            compare_fre(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "cfa":
         try:
             compare_cfa(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -836,7 +922,7 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa"):
+    if args.model in ("reverse_distillation", "cfa", "fre"):
         report["information"] = information
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)

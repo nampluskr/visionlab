@@ -253,10 +253,11 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 
 ## D-22. 학습 에폭은 10 epoch로 고정하고, 1 epoch 적합 모델은 예외로 한다
 
-- **선택**: 여러 에폭이 필요한 모델은 공유 yaml의 `max_epochs=10`을 레퍼런스와 native에 똑같이 쓰고 모델 yaml로 덮어쓰지 않는다(Phase 2 EfficientAD, 사용자 결정 2026-10-25). 원본이 `trainer_arguments`로 `max_epochs=1`을 고정하는 적합형 모델은 그 값을 따르며, 레퍼런스 yaml과 native yaml 모두 `max_epochs: 1`이다(Phase 3 PaDiM 사용자 결정 2026-10-25, Phase 4 DFM 사용자 결정 2026-10-26).
-- **적용 범위**: 모델이 10이 아닌 여러 에폭을 고정하는 경우(PLAN의 FRE 220 epoch)는 이 결정에 포함되지 않는다. 해당 Phase 시작 전에 사용자가 정한다.
-- **근거**: 원본이 고정한 값을 바꾸면 알고리즘을 바꾸는 것이다(D-18). 레퍼런스와 native가 같은 학습 예산이어야 FR-18 비교가 성립한다.
-- **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다).
+- **선택**: 여러 에폭이 필요한 모델은 공유 yaml의 `max_epochs=10`을 레퍼런스와 native에 똑같이 쓰고 모델 yaml로 덮어쓰지 않는다(Phase 2 EfficientAD, 사용자 결정 2026-10-25). 원본이 `trainer_arguments`로 `max_epochs=1`을 고정하는 적합형 모델은 그 값을 따르며, 레퍼런스 yaml과 native yaml 모두 `max_epochs: 1`이다(Phase 3 PaDiM 사용자 결정 2026-10-25, Phase 4 DFM 사용자 결정 2026-10-26). 원본이 `trainer_arguments`로 1이 아닌 에폭을 고정하는 모델(FRE의 220 epoch)은 레퍼런스 어댑터(`evaluation/anomalib/local_models.py`의 `LocalFre`)가 그 값을 공유 예산의 10으로 바꾸고, native의 `trainer_arguments`도 10으로 둔다(Phase 9, 사용자 결정 2026-10-26).
+- **적용 범위**: 모델이 10이 아닌 여러 에폭을 고정하는 경우는 레퍼런스와 native 모두 10으로 통일한다. 원본이 의도한 에폭에서의 성능은 확인하지 않는다.
+- **근거**: 원본이 고정한 값을 바꾸면 알고리즘을 바꾸는 것이다(D-18). 레퍼런스와 native가 같은 학습 예산이어야 FR-18 비교가 성립한다. FRE의 220 epoch는 알고리즘(구조, 손실)이 아니라 학습 예산이므로 사용자가 예외로 정했다. 220 epoch는 측정한 에폭당 속도로 bottle 약 35분, visa 약 100분이 1회당 들고 레퍼런스와 native를 합치면 약 4.5시간이 예상되었다. 10 epoch는 두 category 합계 약 7분이었다(Phase 9).
+- **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다). FRE에 원본의 220 epoch를 그대로 쓰는 방식(시간이 길다. Phase 9에서 처음 정한 뒤 사용자가 철회했다). 임의의 N epoch로 절충하는 방식(근거가 없다).
+- **남은 한계**: FRE는 원본이 고정한 220 epoch가 아니라 10 epoch로 학습한 결과를 비교하므로 원본이 의도한 수렴 상태의 성능은 확인하지 않았다(Phase 9).
 
 ## D-23. kornia를 순수 모델의 외부 의존으로 허용한다
 

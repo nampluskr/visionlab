@@ -118,7 +118,7 @@ Phase 1~18의 각 모델 Phase에 적용한다. 각 Phase는 모델 하나를 �
 | 6 | PatchCore | 1 epoch memory bank | coreset 샘플링, kNN |
 | 7 | Reverse Distillation | 역전파 | STFPM의 고정 encoder 확장, decoder 추가 |
 | 8 | CFA | centroid 초기화 + 역전파 | torchvision backbone, memory bank 경험 활용 |
-| 9 | FRE | 역전파 | 모델이 220 epoch을 고정해 검증 시간이 길다 |
+| 9 | FRE | 역전파 | 원본은 220 epoch을 고정하지만 10 epoch로 통일한다(D-22) |
 | 10 | SuperSimpleNet | 합성 특징 이상 | 공통 Perlin 생성 함수 도입 |
 | 11 | DRAEM | 합성 이미지 이상 | Perlin 재사용, DTD augmentation, resize 전용 전처리 |
 | 12 | FastFlow | flow | 공통 flow 블록(AllInOneBlock)과 Jacobian 계산 독립 구현 |

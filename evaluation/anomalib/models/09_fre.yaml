@@ -1,7 +1,8 @@
 # evaluation/anomalib/models/09_fre.yaml: fre model
 
+# The original pins max_epochs=220; LocalFre overrides it with the shared 10 epochs (user decision).
 model:
-  class_path: anomalib.models.Fre
+  class_path: local_models.LocalFre
   init_args:
     backbone: resnet50
     layer: layer3

@@ -1,4 +1,4 @@
-# evaluation/anomalib/local_models.py: anomalib model subclasses that load their assets from local files
+# evaluation/anomalib/local_models.py: anomalib model subclasses for local assets and phase-specific overrides
 
 import os
 
@@ -81,3 +81,14 @@ class LocalWinClip(models.WinClip):
         # winclip.torch_model reads the module constant PRETRAINED; open_clip accepts a file path.
         winclip_torch_model.PRETRAINED = weights_file
         super().__init__(**kwargs)
+
+
+class LocalFre(models.Fre):
+    """Fre using the shared ten-epoch budget by user decision."""
+
+    @property
+    def trainer_arguments(self):
+        arguments = super().trainer_arguments.copy()
+        # The original pins max_epochs=220; this phase uses the shared 10-epoch budget by user decision.
+        arguments["max_epochs"] = 10
+        return arguments
