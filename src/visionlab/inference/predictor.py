@@ -7,6 +7,7 @@ from visionlab.anomaly_detection.common.pre_processor import PreProcessor
 from visionlab.anomaly_detection.models.stfpm.model import STFPMModel
 from visionlab.anomaly_detection.models.efficient_ad.model import EfficientAdModel
 from visionlab.anomaly_detection.models.padim.model import PadimModel
+from visionlab.anomaly_detection.models.dfm.model import DFMModel
 from visionlab.utils.io import load_export
 
 
@@ -22,7 +23,7 @@ class Predictor:
     @classmethod
     def from_export(cls, path, device="cpu"):
         exported = load_export(path)
-        models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel, "padim": PadimModel}
+        models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel, "padim": PadimModel, "dfm": DFMModel}
         model = models[exported["model_name"]](**exported["model_args"])
         model.load_state_dict(exported["model_state"], strict=True)
         pre_processor = PreProcessor(mean=exported["pre_processor"]["mean"], std=exported["pre_processor"]["std"])

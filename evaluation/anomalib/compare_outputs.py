@@ -21,7 +21,8 @@ import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import EfficientAd, Padim, Stfpm
+from anomalib.models import Dfm, EfficientAd, Padim, Stfpm
+from anomalib.models.image.dfm.torch_model import DFMModel as ReferenceDFMModel
 from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
 
@@ -36,6 +37,8 @@ from visionlab.anomaly_detection.models.efficient_ad.lightning_model import Effi
 from visionlab.anomaly_detection.models.efficient_ad.model import EfficientAdModel
 from visionlab.anomaly_detection.models.padim.lightning_model import PadimLitModel
 from visionlab.anomaly_detection.models.padim.model import PadimModel
+from visionlab.anomaly_detection.models.dfm.lightning_model import DfmLitModel
+from visionlab.anomaly_detection.models.dfm.model import DFMModel
 from visionlab.utils.io import file_sha256
 from local_models import LocalEfficientAd
 
@@ -46,6 +49,8 @@ EFFICIENT_AD_RTOL = 1e-5
 EFFICIENT_AD_ATOL = 1e-6
 PADIM_RTOL = 1e-5
 PADIM_ATOL = 1e-6
+DFM_RTOL = 1e-5
+DFM_ATOL = 1e-6
 
 
 def signature_fields(model_class):
@@ -328,10 +333,90 @@ def compare_padim(checks, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_dfm_forwards(checks, reference, native, data, samples):
+    """Compare original FRE outputs on separately cloned real normalized image batches."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    compare_tensor(checks, f"FR-5 {data} pred_score", expected.pred_score, actual.pred_score,
+                   rtol=DFM_RTOL, atol=DFM_ATOL)
+    compare_tensor(checks, f"FR-5 {data} anomaly_map", expected.anomaly_map, actual.anomaly_map,
+                   rtol=DFM_RTOL, atol=DFM_ATOL)
+
+
+def compare_dfm(checks, samples, reference_checkpoint):
+    """Compare DFM constructors, local backbone weights and fitted PCA reconstruction outputs."""
+    record_check(checks, "FR-6 constructor signature", signature_fields(Dfm) == signature_fields(DfmLitModel),
+                 {"reference": signature_fields(Dfm), "native": signature_fields(DfmLitModel)})
+    reference = Dfm(backbone="resnet50", pre_trained=True, pre_processor=False,
+                    post_processor=False, evaluator=False, visualizer=False)
+    native = DfmLitModel(backbone="resnet50", pre_trained=True, pre_processor=False,
+                         post_processor=False, evaluator=False, visualizer=False)
+    expected = reference.model.feature_extractor.state_dict()
+    actual = native.model.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    pure_reference = ReferenceDFMModel(backbone="resnet50", layer="layer3", pre_trained=False)
+    pure_native = DFMModel(backbone="resnet50", layer="layer3", pre_trained=False)
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+    else:
+        state = reference.model.state_dict()
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    if reference_checkpoint:
+        record_check(checks, "FR-5 reference checkpoint strict restore", True,
+                     {"path": os.path.abspath(reference_checkpoint), "sha256": file_sha256(reference_checkpoint)})
+    else:
+        pure_reference.train()
+        with torch.no_grad():
+            dimensions = pure_reference.get_features(torch.zeros(1, 3, 256, 256)).shape[1]
+        features = torch.randn(12, dimensions, generator=torch.Generator().manual_seed(42))
+        pure_reference.fit(features.clone())
+        pure_native.fit(features.clone())
+        left, right = pure_reference.pca_model, pure_native.pca_model
+        for name in ("mean", "num_components"):
+            compare_tensor(checks, f"FR-5 synthetic PCA {name}", getattr(left, name), getattr(right, name),
+                           rtol=DFM_RTOL, atol=DFM_ATOL)
+        same_shape = left.singular_vectors.shape == right.singular_vectors.shape
+        k = left.singular_vectors.shape[1]
+        overlap = (left.singular_vectors.double().T @ right.singular_vectors.double()).square().sum().item() if same_shape else None
+        record_check(checks, "FR-5 synthetic PCA subspace", same_shape and math.isclose(overlap, k, rel_tol=DFM_RTOL, abs_tol=DFM_ATOL),
+                     {"reference_shape": list(left.singular_vectors.shape), "native_shape": list(right.singular_vectors.shape),
+                      "components": k, "cross_gram_squared_frobenius": overlap})
+    for data in ("mvtec", "visa"):
+        try:
+            compare_dfm_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -341,8 +426,15 @@ def main():
     rtol, atol = (EFFICIENT_AD_RTOL, EFFICIENT_AD_ATOL) if args.model == "efficient_ad" else (RTOL, ATOL)
     if args.model == "padim":
         rtol, atol = PADIM_RTOL, PADIM_ATOL
+    elif args.model == "dfm":
+        rtol, atol = DFM_RTOL, DFM_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "padim":
+    if args.model == "dfm":
+        try:
+            compare_dfm(checks, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "padim":
         try:
             compare_padim(checks, args.samples, args.reference_checkpoint)
         except Exception as error:

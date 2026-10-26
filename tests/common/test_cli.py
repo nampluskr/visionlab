@@ -153,3 +153,26 @@ def test_padim_config_merging_and_output_name(tmp_path, cli_assets):
     assert cli.model.model.n_features == 100 and cli.model.visualizer is None
     assert cli.model.pre_trained is True
     assert cli.trainer.default_root_dir.endswith(os.path.join("padim", "mvtec_bottle", "v0"))
+
+
+def test_dfm_config_merging_and_output_name(tmp_path, monkeypatch):
+    """Load the default ResNet50 DFM config and enforce its fixed fitting trainer arguments."""
+    import timm
+    import torch
+
+    weights = os.path.join(tmp_path, "resnet50.pth")
+    torch.save(timm.create_model("resnet50", pretrained=False).state_dict(), weights)
+    mapping = os.path.join(tmp_path, "paths.toml")
+    with open(mapping, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write('[backbones]\nresnet50 = "' + weights.replace("\\", "/") + '"\n')
+    monkeypatch.setattr(io_utils, "PATHS_FILE", mapping)
+    cli = LitCLI(args=["--data", "mvtec", "--model", "dfm", "--trainer.max_epochs", "5",
+                       "--trainer.num_sanity_val_steps", "2", "--trainer.gradient_clip_val", "5",
+                       "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                       "--trainer.devices", "1", "--trainer.logger", "false"], run=False)
+    assert cli.trainer.max_epochs == 1 and cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.backbone == "resnet50" and cli.model.layer == "layer3"
+    assert cli.model.pca_level == 0.97 and cli.model.score_type == "fre" and cli.model.visualizer is None
+    assert cli.model.teacher_weights_path == weights
+    assert cli.trainer.default_root_dir.endswith(os.path.join("dfm", "mvtec_bottle", "v0"))

@@ -44,7 +44,7 @@ def latest_export(model, data, category):
 def main(args=None):
     """Evaluate the configured pure test split and save explicit metric failure reasons."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm"), required=True)
     parser.add_argument("--data", choices=("mvtec", "visa"), required=True)
     parser.add_argument("--export")
     parser.add_argument("--category")

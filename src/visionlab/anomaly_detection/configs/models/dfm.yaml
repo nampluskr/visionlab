@@ -1,0 +1,18 @@
+# src/visionlab/anomaly_detection/configs/models/dfm.yaml: local DFM model and fixed fitting epoch
+# Pass --data <name> before --model dfm.
+model:
+  class_path: visionlab.anomaly_detection.models.dfm.lightning_model.DfmLitModel
+  init_args:
+    backbone: resnet50
+    layer: layer3
+    pre_trained: true
+    pooling_kernel_size: 4
+    pca_level: 0.97
+    score_type: fre
+    visualizer: false
+
+# DFM pins one fitting epoch, an exception to the shared ten-epoch budget.
+trainer:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

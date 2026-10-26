@@ -126,7 +126,7 @@ def load_export(path):
     required = {"format_version", "model_name", "model_args", "model_state", "pre_processor", "post_processor"}
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("Invalid model export fields")
-    if payload["format_version"] != 1 or payload["model_name"] not in ("stfpm", "efficient_ad", "padim"):
+    if payload["format_version"] != 1 or payload["model_name"] not in ("stfpm", "efficient_ad", "padim", "dfm"):
         raise ValueError("Unsupported model export format")
     return payload
 
