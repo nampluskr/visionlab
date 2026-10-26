@@ -23,7 +23,11 @@ import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Cfa, Dfkde, Dfm, EfficientAd, Fre, Padim, Patchcore, ReverseDistillation, Stfpm
+from anomalib.models import Cfa, Dfkde, Dfm, EfficientAd, Fre, Padim, Patchcore, ReverseDistillation, Stfpm, Supersimplenet
+from anomalib.data.utils.generators import generate_perlin_noise as reference_perlin_noise
+from anomalib.models.image.supersimplenet.torch_model import SupersimplenetModel as ReferenceSupersimplenetModel
+from anomalib.models.image.supersimplenet.anomaly_generator import AnomalyGenerator as ReferenceAnomalyGenerator
+from anomalib.models.image.supersimplenet.loss import SSNLoss as ReferenceSSNLoss
 from anomalib.models.image.cfa import torch_model as reference_cfa_module
 from anomalib.models.image.fre.torch_model import FREModel as ReferenceFREModel
 from anomalib.models.image.dfkde.torch_model import DfkdeModel as ReferenceDfkdeModel
@@ -58,6 +62,11 @@ from visionlab.anomaly_detection.models.cfa.lightning_model import CfaLitModel
 from visionlab.anomaly_detection.models.cfa.model import CfaModel
 from visionlab.anomaly_detection.models.fre.lightning_model import FreLitModel
 from visionlab.anomaly_detection.models.fre.model import FREModel
+from visionlab.anomaly_detection.common.perlin import generate_perlin_noise
+from visionlab.anomaly_detection.models.supersimplenet.lightning_model import SupersimplenetLitModel
+from visionlab.anomaly_detection.models.supersimplenet.model import SupersimplenetModel
+from visionlab.anomaly_detection.models.supersimplenet.anomaly_generator import AnomalyGenerator
+from visionlab.anomaly_detection.models.supersimplenet.loss import SSNLoss
 from visionlab.utils.io import file_sha256
 from local_models import LocalCfa, LocalEfficientAd
 
@@ -80,6 +89,8 @@ CFA_RTOL = 1e-5
 CFA_ATOL = 1e-6
 FRE_RTOL = 1e-5
 FRE_ATOL = 1e-6
+SUPERSIMPLENET_RTOL = 1e-5
+SUPERSIMPLENET_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -846,11 +857,145 @@ def compare_fre(checks, information, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_supersimplenet_randomness(checks):
+    """Compare CPU and available CUDA Perlin and default-device synthetic features under matched seeds."""
+    devices = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+    with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+        for name in devices:
+            device = torch.device(name)
+            torch.manual_seed(42)
+            expected = reference_perlin_noise(height=64, width=64, device=device)
+            torch.manual_seed(42)
+            actual = generate_perlin_noise(height=64, width=64, device=device)
+            record_check(checks, f"Perlin exact RNG {name}", torch.equal(expected, actual),
+                         {"device": name, "seed": 42, "shape": list(actual.shape)})
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        features = torch.rand(2, 8, 32, 40, device=device)
+        masks, labels = torch.zeros(2, 1, 32, 40, device=device), torch.zeros(2, device=device)
+        reference = ReferenceAnomalyGenerator(noise_mean=0, noise_std=0.015, threshold=0.2)
+        native = AnomalyGenerator(noise_mean=0, noise_std=0.015, threshold=0.2)
+        torch.manual_seed(42)
+        expected = reference(features.clone(), masks.clone(), labels.clone())
+        torch.manual_seed(42)
+        actual = native(features.clone(), masks.clone(), labels.clone())
+    for name, left, right in zip(("perturbed", "masks", "labels"), expected, actual, strict=True):
+        compare_tensor(checks, f"synthetic anomalies {device} {name}", left, right,
+                       rtol=SUPERSIMPLENET_RTOL, atol=SUPERSIMPLENET_ATOL)
+
+
+def compare_supersimplenet_forwards(checks, reference, native, state, data, samples, device):
+    """Reload independent BN states for matched training, loss and checkpoint evaluation comparisons."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)])).to(device)
+    assert images.shape[1:] == (3, 256, 256)
+    masks = torch.zeros(count, 256, 256, dtype=torch.int64, device=device)
+    labels = torch.zeros(count, dtype=torch.int64, device=device)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"], "device": str(device),
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.load_state_dict(state, strict=True)
+    native.load_state_dict(state, strict=True)
+    reference.train()
+    native.train()
+    with torch.no_grad(), torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+        torch.manual_seed(42)
+        expected = reference(images=images.clone(), masks=masks.clone(), labels=labels.clone())
+        torch.manual_seed(42)
+        actual = native(images=images.clone(), masks=masks.clone(), labels=labels.clone())
+        for name, left, right in zip(("anomaly_map", "anomaly_score", "masks", "labels"), expected, actual, strict=True):
+            compare_tensor(checks, f"FR-5 {data} train {name}", left, right,
+                           rtol=SUPERSIMPLENET_RTOL, atol=SUPERSIMPLENET_ATOL)
+        expected_loss = ReferenceSSNLoss()(pred_map=expected[0], pred_score=expected[1],
+                                           target_mask=expected[2], target_label=expected[3])
+        actual_loss = SSNLoss()(pred_map=actual[0], pred_score=actual[1], target_mask=actual[2], target_label=actual[3])
+        compare_tensor(checks, f"FR-5 {data} SSNLoss", expected_loss, actual_loss,
+                       rtol=SUPERSIMPLENET_RTOL, atol=SUPERSIMPLENET_ATOL)
+    # Discard training-forward BN updates before checking the supplied evaluation state.
+    reference.load_state_dict(state, strict=True)
+    native.load_state_dict(state, strict=True)
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    for name in ("pred_score", "anomaly_map"):
+        compare_tensor(checks, f"FR-5 {data} eval {name}", getattr(expected, name), getattr(actual, name),
+                       rtol=SUPERSIMPLENET_RTOL, atol=SUPERSIMPLENET_ATOL)
+    record_check(checks, f"FR-5 {data} eval shapes",
+                 actual.anomaly_map.shape == (count, 1, 256, 256) and actual.pred_score.shape == (() if count == 1 else (count,)),
+                 {"anomaly_map": list(actual.anomaly_map.shape), "pred_score": list(actual.pred_score.shape)})
+
+
+def compare_supersimplenet(checks, information, samples, reference_checkpoint):
+    """Compare signatures, local backbone, initialized heads, synthesis and shared real forwards."""
+    record_check(checks, "FR-6 constructor signature",
+                 signature_fields(Supersimplenet) == signature_fields(SupersimplenetLitModel),
+                 {"reference": signature_fields(Supersimplenet), "native": signature_fields(SupersimplenetLitModel)})
+    compare_supersimplenet_randomness(checks)
+    reference = Supersimplenet(backbone="wide_resnet50_2", pre_processor=False, post_processor=False,
+                               evaluator=False, visualizer=False)
+    native = SupersimplenetLitModel(backbone="wide_resnet50_2", pre_processor=False, post_processor=False,
+                                    evaluator=False, visualizer=False)
+    expected = reference.model.feature_extractor.feature_extractor.state_dict()
+    actual = native.model.feature_extractor.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = reference.model.state_dict()
+    del reference, native, expected, actual
+    with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+        torch.manual_seed(42)
+        pure_reference = ReferenceSupersimplenetModel(perlin_threshold=0.2, backbone="wide_resnet50_2",
+                                                      layers=["layer2", "layer3"], stop_grad=True)
+        torch.manual_seed(42)
+        pure_native = SupersimplenetModel(perlin_threshold=0.2, backbone="wide_resnet50_2",
+                                          layers=["layer2", "layer3"], stop_grad=True)
+    for branch in ("adaptor", "segdec"):
+        left, right = getattr(pure_reference, branch).state_dict(), getattr(pure_native, branch).state_dict()
+        mismatches = sorted(name for name in left.keys() & right.keys() if not torch.equal(left[name], right[name]))
+        entry = {"name": f"seeded initial {branch}", "informational_only": True, "seed": 42,
+                 "equal": left.keys() == right.keys() and not mismatches,
+                 "missing": sorted(left.keys() - right.keys()), "unexpected": sorted(right.keys() - left.keys()),
+                 "mismatches": mismatches}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+    del left, right
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "reference random initial state"})
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pure_reference.to(device)
+    pure_native.to(device)
+    for data in ("mvtec", "visa"):
+        try:
+            compare_supersimplenet_forwards(checks, pure_reference, pure_native, state, data, samples, device)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -873,8 +1018,15 @@ def main():
         rtol, atol = CFA_RTOL, CFA_ATOL
     elif args.model == "fre":
         rtol, atol = FRE_RTOL, FRE_ATOL
+    elif args.model == "supersimplenet":
+        rtol, atol = SUPERSIMPLENET_RTOL, SUPERSIMPLENET_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "fre":
+    if args.model == "supersimplenet":
+        try:
+            compare_supersimplenet(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "fre":
         try:
             compare_fre(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -922,7 +1074,7 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet"):
         report["information"] = information
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)

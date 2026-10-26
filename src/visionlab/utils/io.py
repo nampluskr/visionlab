@@ -129,7 +129,8 @@ def load_export(path):
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("Invalid model export fields")
     if payload["format_version"] != 1 or payload["model_name"] not in (
-            "stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore", "reverse_distillation", "cfa", "fre"):
+            "stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore", "reverse_distillation", "cfa", "fre",
+            "supersimplenet"):
         raise ValueError("Unsupported model export format")
     payload["pre_processor"].setdefault("center_crop", None)
     return payload

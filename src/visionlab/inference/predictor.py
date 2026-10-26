@@ -13,6 +13,7 @@ from visionlab.anomaly_detection.models.patchcore.model import PatchcoreModel
 from visionlab.anomaly_detection.models.reverse_distillation.model import ReverseDistillationModel
 from visionlab.anomaly_detection.models.cfa.model import CfaModel
 from visionlab.anomaly_detection.models.fre.model import FREModel
+from visionlab.anomaly_detection.models.supersimplenet.model import SupersimplenetModel
 from visionlab.anomaly_detection.models.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
 from visionlab.anomaly_detection.models.components.classification import FeatureScalingMethod
 from visionlab.utils.io import load_export
@@ -32,7 +33,8 @@ class Predictor:
         exported = load_export(path)
         models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel, "padim": PadimModel,
                   "dfm": DFMModel, "dfkde": DfkdeModel, "patchcore": PatchcoreModel,
-                  "reverse_distillation": ReverseDistillationModel, "cfa": CfaModel, "fre": FREModel}
+                  "reverse_distillation": ReverseDistillationModel, "cfa": CfaModel, "fre": FREModel,
+                  "supersimplenet": SupersimplenetModel}
         model_args = dict(exported["model_args"])
         if exported["model_name"] == "dfkde":
             model_args["feature_scaling_method"] = FeatureScalingMethod(model_args["feature_scaling_method"])

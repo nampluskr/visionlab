@@ -1,0 +1,14 @@
+# src/visionlab/anomaly_detection/configs/models/supersimplenet.yaml: native SuperSimpleNet with local pretrained features
+# Pass --data <name> before --model supersimplenet.
+model:
+  class_path: visionlab.anomaly_detection.models.supersimplenet.lightning_model.SupersimplenetLitModel
+  init_args:
+    perlin_threshold: 0.2
+    backbone: wide_resnet50_2
+    layers: [layer2, layer3]
+    supervised: false
+    visualizer: false
+
+trainer:
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

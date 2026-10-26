@@ -45,7 +45,7 @@ def main(args=None):
     """Evaluate the configured pure test split and save explicit metric failure reasons."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet"), required=True)
     parser.add_argument("--data", choices=("mvtec", "visa"), required=True)
     parser.add_argument("--export")
     parser.add_argument("--category")
