@@ -273,10 +273,10 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **남은 한계**: 레퍼런스의 raw 값은 구하지 않았다. 사용자가 추가 실행 없이 Phase를 닫기로 했으므로, raw 정의의 비교는 출력 일치(FR-5)와 정규화 값 일치에서 추론한 것이다. 점수 규모가 큰 모델(Phase 5 DFKDE, Phase 9 FRE 등)에서 같은 차이가 반복될 수 있다.
 - **배제한 대안**: raw AUROC를 기준으로 하고 레퍼런스의 raw 값을 따로 구해 비교하는 방식(레퍼런스 평가를 추가로 실행해야 한다). 미충족으로 두고 기준 정의를 바꾸는 방식(차이가 구현이 아니라 지표 정의에서 나오므로 Phase가 막히기만 한다).
 
-## D-25. scikit-learn을 coreset 적합 때만 쓰는 지연 외부 의존으로 허용한다
+## D-25. scikit-learn을 적합 때만 쓰는 지연 외부 의존으로 허용한다
 
-- **선택**: PatchCore의 `SparseRandomProjection`은 원본처럼 `sklearn.utils.random.sample_without_replacement`를 쓴다. 독립 구현하지 않고, 이 import를 `_sparse_random_matrix` 함수 안(밀도가 1이 아닌 분기)으로 옮긴다(Phase 6, 사용자 결정 2026-10-26).
-- **적용 범위**: `sample_without_replacement` 한 함수에만 해당한다. metric 계산에 scikit-learn을 쓰지 않는다는 D-20은 그대로다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. 추론 경로는 scikit-learn 없이 import되고 동작한다. `tests/common/test_dependency.py`가 `src/visionlab`에서 허용된 이 import 외의 scikit-learn import가 없음을 검사하고, `tests/06_patchcore`가 scikit-learn을 차단한 자식 프로세스에서 순수 모듈 import와 추론이 성공하고 `fit`만 `ModuleNotFoundError`를 내는 것을 확인한다.
+- **선택**: PatchCore의 `SparseRandomProjection`은 원본처럼 `sklearn.utils.random.sample_without_replacement`를 쓴다. 독립 구현하지 않고, 이 import를 `_sparse_random_matrix` 함수 안(밀도가 1이 아닌 분기)으로 옮긴다(Phase 6, 사용자 결정 2026-10-26). CFA의 `initialize_centroid`가 `gamma_c > 1`일 때 쓰는 `sklearn.cluster.KMeans`도 같은 방식으로 그 분기 안에서 지연 import한다(Phase 8, 사용자 결정 2026-10-26).
+- **적용 범위**: `sklearn.utils.random.sample_without_replacement`(PatchCore)와 `sklearn.cluster.KMeans`(CFA) 두 곳에만 해당한다. metric 계산에 scikit-learn을 쓰지 않는다는 D-20은 그대로다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. 추론 경로는 scikit-learn 없이 import되고 동작한다. `tests/common/test_dependency.py`가 허용 목록(파일, 클래스, 메서드, 모듈, 이름의 상수)에 있는 두 import 외의 scikit-learn import가 `src/visionlab`에 없음을 검사하고, `tests/06_patchcore`와 `tests/08_cfa`가 scikit-learn을 차단한 자식 프로세스에서 순수 모듈 import와 추론이 성공하고 적합 분기만 `ModuleNotFoundError`를 내는 것을 확인한다. CFA의 `KMeans` 분기(`gamma_c > 1`)는 기본값(`gamma_c=1`)에서 실행되지 않으므로 이 분기의 수치는 실행으로 검증하지 않았다(Phase 8).
 - **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다(D-23과 같다). scikit-learn은 PyTorch 위의 라이브러리가 아니므로 이 결정은 그 범위를 적합 시점의 예외로 넓혀 읽는다. 배포되는 추론 경로에는 남지 않는다. INTENT는 고치지 않는다.
-- **근거**: 원본 알고리즘 보존(D-18). 독립 구현하면 난수를 소비하는 순서가 달라져 coreset이 레퍼런스와 어긋날 수 있다. 같은 seed에서 native의 memory bank가 레퍼런스와 모든 행이 같았다(Phase 6, bottle 16,385행, capsule 17,169행).
-- **배제한 대안**: numpy나 torch로 `sample_without_replacement`를 독립 구현하는 방식(coreset이 레퍼런스와 어긋날 위험이 있다). 모듈 최상단에서 import하는 방식(추론 환경에도 scikit-learn이 필요해진다).
+- **근거**: 원본 알고리즘 보존(D-18). 독립 구현하면 난수를 소비하는 순서가 달라져 coreset이 레퍼런스와 어긋날 수 있다. 같은 seed에서 native의 memory bank가 레퍼런스와 모든 행이 같았다(Phase 6, bottle 16,385행, capsule 17,169행). CFA의 `KMeans`는 기본값에서 쓰이지 않아 import 위치만 옮겼다.
+- **배제한 대안**: numpy나 torch로 `sample_without_replacement`와 `KMeans`를 독립 구현하는 방식(coreset이 레퍼런스와 어긋날 위험이 있다). 모듈 최상단에서 import하는 방식(추론 환경에도 scikit-learn이 필요해진다).

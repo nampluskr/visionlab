@@ -12,6 +12,11 @@ import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SOURCE_ROOT = os.path.join(PROJECT_ROOT, "src", "visionlab")
+SKLEARN_IMPORTS = (
+    ("anomaly_detection/models/components/dimensionality_reduction/random_projection.py",
+     "SparseRandomProjection", "_sparse_random_matrix", "sklearn.utils.random", "sample_without_replacement"),
+    ("anomaly_detection/models/cfa/model.py", "CfaModel", "initialize_centroid", "sklearn.cluster", "KMeans"),
+)
 LIGHTNING_FILES = {
     "anomaly_detection/data/mvtec/lightning_data.py", "anomaly_detection/data/visa/lightning_data.py",
     "anomaly_detection/models/stfpm/lightning_model.py", "anomaly_detection/common/lightning_visualizer.py",
@@ -21,6 +26,7 @@ LIGHTNING_FILES = {
     "anomaly_detection/models/dfkde/lightning_model.py",
     "anomaly_detection/models/patchcore/lightning_model.py",
     "anomaly_detection/models/reverse_distillation/lightning_model.py",
+    "anomaly_detection/models/cfa/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -78,6 +84,7 @@ def classified_modules():
                 (relative.startswith("anomaly_detection/models/reverse_distillation/") and
                  (name in ("model.py", "anomaly_map.py", "loss.py") or
                   relative.startswith("anomaly_detection/models/reverse_distillation/components/"))) or \
+                (relative.startswith("anomaly_detection/models/cfa/") and name in ("model.py", "anomaly_map.py", "loss.py")) or \
                 name == "__init__.py":
             group = "pure"
         else:
@@ -126,22 +133,42 @@ def import_group(group):
     assert not any(name.split(".")[0] in forbidden for name in sys.modules)
 
 
-def sparse_projection_import_lines(path):
-    """Locate only the approved fitting-time sklearn import in the sparse projection method."""
+def allowed_sklearn_import_lines(path):
+    """Locate exact allowlisted imports inside their designated top-level class methods."""
+    relative = os.path.relpath(path, SOURCE_ROOT).replace(os.sep, "/")
+    rules = [rule for rule in SKLEARN_IMPORTS if rule[0] == relative]
+    if not rules:
+        return set()
     with open(path, encoding="utf-8") as stream:
         tree = ast.parse(stream.read(), filename=path)
-    return {node.lineno for cls in tree.body if isinstance(cls, ast.ClassDef) and cls.name == "SparseRandomProjection"
-            for method in cls.body if isinstance(method, ast.FunctionDef) and method.name == "_sparse_random_matrix"
-            for node in ast.walk(method) if isinstance(node, ast.ImportFrom) and node.module == "sklearn.utils.random"
-            and node.level == 0 and len(node.names) == 1 and node.names[0].name == "sample_without_replacement"}
+    allowed = set()
+    for _, class_name, method_name, module, name in rules:
+        matches = []
+        for cls in tree.body:
+            if not isinstance(cls, ast.ClassDef) or cls.name != class_name:
+                continue
+            for method in cls.body:
+                if not isinstance(method, ast.FunctionDef) or method.name != method_name:
+                    continue
+                pending = list(method.body)
+                while pending:
+                    node = pending.pop()
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                        continue
+                    if isinstance(node, ast.ImportFrom) and node.module == module and node.level == 0 and \
+                            len(node.names) == 1 and node.names[0].name == name and node.names[0].asname is None:
+                        matches.append(node.lineno)
+                    pending.extend(ast.iter_child_nodes(node))
+        if len(matches) == 1:
+            allowed.update(matches)
+    return allowed
 
 
 def test_no_reference_imports_in_source():
-    """Keep framework boundaries and allow only the approved fitting-time sklearn import."""
+    """Keep framework boundaries and allow only the two designated fitting-time sklearn imports."""
     for path in python_files(SOURCE_ROOT):
         relative = os.path.relpath(path, SOURCE_ROOT).replace(os.sep, "/")
-        allowed = sparse_projection_import_lines(path) if relative == \
-            "anomaly_detection/models/components/dimensionality_reduction/random_projection.py" else set()
+        allowed = allowed_sklearn_import_lines(path)
         for name, line in source_imports(path):
             assert name not in ("anomalib", "sklearn", "scikit-learn") or \
                 (name == "sklearn" and line in allowed), f"{path}:{line}: {name}"

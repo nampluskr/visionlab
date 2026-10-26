@@ -1,0 +1,17 @@
+# src/visionlab/anomaly_detection/configs/models/cfa.yaml: native CFA with a required local torchvision backbone
+# Pass --data <name> before --model cfa.
+model:
+  class_path: visionlab.anomaly_detection.models.cfa.lightning_model.CfaLitModel
+  init_args:
+    backbone: wide_resnet50_2
+    gamma_c: 1
+    gamma_d: 1
+    num_nearest_neighbors: 3
+    num_hard_negative_features: 3
+    radius: 0.00001
+    visualizer: false
+
+# Keep the shared ten-epoch budget without a model override (D-22).
+trainer:
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

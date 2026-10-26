@@ -16,13 +16,15 @@ import json
 import math
 import random
 from enum import Enum
+from types import SimpleNamespace
 
 import torch
 import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Dfkde, Dfm, EfficientAd, Padim, Patchcore, ReverseDistillation, Stfpm
+from anomalib.models import Cfa, Dfkde, Dfm, EfficientAd, Padim, Patchcore, ReverseDistillation, Stfpm
+from anomalib.models.image.cfa import torch_model as reference_cfa_module
 from anomalib.models.image.dfkde.torch_model import DfkdeModel as ReferenceDfkdeModel
 from anomalib.models.image.dfm.torch_model import DFMModel as ReferenceDFMModel
 from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
@@ -51,8 +53,10 @@ from visionlab.anomaly_detection.models.patchcore.model import PatchcoreModel
 from visionlab.anomaly_detection.models.reverse_distillation.lightning_model import ReverseDistillationLitModel
 from visionlab.anomaly_detection.models.reverse_distillation.model import ReverseDistillationModel
 from visionlab.anomaly_detection.models.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
+from visionlab.anomaly_detection.models.cfa.lightning_model import CfaLitModel
+from visionlab.anomaly_detection.models.cfa.model import CfaModel
 from visionlab.utils.io import file_sha256
-from local_models import LocalEfficientAd
+from local_models import LocalCfa, LocalEfficientAd
 
 RTOL = 1e-4
 ATOL = 1e-5
@@ -69,6 +73,8 @@ PATCHCORE_RTOL = 1e-5
 PATCHCORE_ATOL = 1e-6
 REVERSE_DISTILLATION_RTOL = 1e-5
 REVERSE_DISTILLATION_ATOL = 1e-6
+CFA_RTOL = 1e-5
+CFA_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -667,11 +673,105 @@ def compare_reverse_distillation(checks, information, samples, reference_checkpo
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_cfa_forwards(checks, reference, native, data, samples):
+    """Compare CFA raw outputs on shared normalized 256-pixel real samples."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    compare_tensor(checks, f"FR-5 {data} pred_score", expected.pred_score, actual.pred_score,
+                   rtol=CFA_RTOL, atol=CFA_ATOL)
+    compare_tensor(checks, f"FR-5 {data} anomaly_map", expected.anomaly_map, actual.anomaly_map,
+                   rtol=CFA_RTOL, atol=CFA_ATOL)
+
+
+def compare_cfa(checks, information, samples, reference_checkpoint):
+    """Compare CFA signatures, local weights, shared centroids and strict-restored real forwards."""
+    record_check(checks, "FR-6 constructor signature", signature_fields(Cfa) == signature_fields(CfaLitModel),
+                 {"reference": signature_fields(Cfa), "native": signature_fields(CfaLitModel)})
+    native = CfaLitModel(backbone="wide_resnet50_2", pre_processor=False, post_processor=False,
+                          evaluator=False, visualizer=False)
+    original_factory = reference_cfa_module.get_feature_extractor
+    try:
+        reference = LocalCfa(backbone="wide_resnet50_2", weights_file=native.teacher_weights_path,
+                             pre_processor=False, post_processor=False, evaluator=False, visualizer=False)
+        with torch.random.fork_rng(devices=[]):
+            torch.random.default_generator.manual_seed(42)
+            seeded_reference = reference_cfa_module.CfaModel(
+                backbone="wide_resnet50_2", gamma_c=1, gamma_d=1, num_nearest_neighbors=3,
+                num_hard_negative_features=3, radius=1e-5)
+    finally:
+        reference_cfa_module.get_feature_extractor = original_factory
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        pure = CfaModel(backbone="wide_resnet50_2", gamma_c=1, gamma_d=1, num_nearest_neighbors=3,
+                        num_hard_negative_features=3, radius=1e-5)
+    left, right = seeded_reference.descriptor.state_dict(), pure.descriptor.state_dict()
+    mismatches = sorted(name for name in left.keys() & right.keys() if not torch.equal(left[name], right[name]))
+    entry = {"name": "seeded initial descriptor", "informational_only": True, "seed": 42,
+             "equal": left.keys() == right.keys() and not mismatches, "mismatches": mismatches}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    del seeded_reference, left, right
+    expected, actual = reference.model.feature_extractor.state_dict(), native.model.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = reference.model.state_dict()
+        state["memory_bank"] = torch.randn(1792, 64, generator=torch.Generator().manual_seed(42))
+    reference.model.load_state_dict(state, strict=True)
+    pure.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "shared synthetic memory bank",
+                  "memory_bank_shape": list(state["memory_bank"].shape)})
+    del state, native, expected, actual
+    for data in ("mvtec", "visa"):
+        try:
+            compare_cfa_forwards(checks, reference.model, pure, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+    # Fresh scalar banks reproduce the initial centroid pass without overwriting the checkpoint comparison.
+    reference.model.memory_bank = reference.model.memory_bank.new_zeros(())
+    pure.memory_bank = pure.memory_bank.new_zeros(())
+    reference.model.eval()
+    pure.eval()
+    generator = torch.Generator().manual_seed(42)
+    images = [torch.rand(1, 3, 256, 256, generator=generator) for _ in range(2)]
+    reference.model.initialize_centroid([SimpleNamespace(image=image.clone()) for image in images])
+    pure.initialize_centroid([(image.clone(), {}) for image in images])
+    compare_tensor(checks, "FR-5 raw centroid initialization", reference.model.memory_bank, pure.memory_bank,
+                   rtol=CFA_RTOL, atol=CFA_ATOL)
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation"), required=True)
+                                          "reverse_distillation", "cfa"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -690,8 +790,15 @@ def main():
         rtol, atol = PATCHCORE_RTOL, PATCHCORE_ATOL
     elif args.model == "reverse_distillation":
         rtol, atol = REVERSE_DISTILLATION_RTOL, REVERSE_DISTILLATION_ATOL
+    elif args.model == "cfa":
+        rtol, atol = CFA_RTOL, CFA_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "reverse_distillation":
+    if args.model == "cfa":
+        try:
+            compare_cfa(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "reverse_distillation":
         try:
             compare_reverse_distillation(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -729,7 +836,7 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model == "reverse_distillation":
+    if args.model in ("reverse_distillation", "cfa"):
         report["information"] = information
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
