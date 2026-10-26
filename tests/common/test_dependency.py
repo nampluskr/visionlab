@@ -19,6 +19,7 @@ LIGHTNING_FILES = {
     "anomaly_detection/models/padim/lightning_model.py",
     "anomaly_detection/models/dfm/lightning_model.py",
     "anomaly_detection/models/dfkde/lightning_model.py",
+    "anomaly_detection/models/patchcore/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -72,6 +73,7 @@ def classified_modules():
                 (relative.startswith("anomaly_detection/models/padim/") and name in ("model.py", "anomaly_map.py")) or \
                 (relative.startswith("anomaly_detection/models/dfm/") and name == "model.py") or \
                 (relative.startswith("anomaly_detection/models/dfkde/") and name == "model.py") or \
+                (relative.startswith("anomaly_detection/models/patchcore/") and name in ("model.py", "anomaly_map.py")) or \
                 name == "__init__.py":
             group = "pure"
         else:
@@ -120,12 +122,25 @@ def import_group(group):
     assert not any(name.split(".")[0] in forbidden for name in sys.modules)
 
 
+def sparse_projection_import_lines(path):
+    """Locate only the approved fitting-time sklearn import in the sparse projection method."""
+    with open(path, encoding="utf-8") as stream:
+        tree = ast.parse(stream.read(), filename=path)
+    return {node.lineno for cls in tree.body if isinstance(cls, ast.ClassDef) and cls.name == "SparseRandomProjection"
+            for method in cls.body if isinstance(method, ast.FunctionDef) and method.name == "_sparse_random_matrix"
+            for node in ast.walk(method) if isinstance(node, ast.ImportFrom) and node.module == "sklearn.utils.random"
+            and node.level == 0 and len(node.names) == 1 and node.names[0].name == "sample_without_replacement"}
+
+
 def test_no_reference_imports_in_source():
-    """Keep reference and sklearn imports absent and native imports within the four allowed file names."""
+    """Keep framework boundaries and allow only the approved fitting-time sklearn import."""
     for path in python_files(SOURCE_ROOT):
         relative = os.path.relpath(path, SOURCE_ROOT).replace(os.sep, "/")
+        allowed = sparse_projection_import_lines(path) if relative == \
+            "anomaly_detection/models/components/dimensionality_reduction/random_projection.py" else set()
         for name, line in source_imports(path):
-            assert name not in ("anomalib", "sklearn", "scikit-learn"), f"{path}:{line}: {name}"
+            assert name not in ("anomalib", "sklearn", "scikit-learn") or \
+                (name == "sklearn" and line in allowed), f"{path}:{line}: {name}"
             if name in ("lightning", "pytorch_lightning"):
                 assert relative in LIGHTNING_FILES, f"{path}:{line}: {name}"
 

@@ -111,7 +111,9 @@ def save_export(path, model, model_name, model_args, pre_processor, post_process
         "model_name": model_name,
         "model_args": model_args,
         "model_state": {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()},
-        "pre_processor": {"mean": mean, "std": std},
+        "pre_processor": {"mean": mean, "std": std,
+                          "center_crop": None if pre_processor is None or pre_processor.center_crop is None
+                          else list(pre_processor.center_crop)},
         "post_processor": None if post_processor is None else post_processor.state_dict(),
     }
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -126,8 +128,10 @@ def load_export(path):
     required = {"format_version", "model_name", "model_args", "model_state", "pre_processor", "post_processor"}
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("Invalid model export fields")
-    if payload["format_version"] != 1 or payload["model_name"] not in ("stfpm", "efficient_ad", "padim", "dfm", "dfkde"):
+    if payload["format_version"] != 1 or payload["model_name"] not in (
+            "stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore"):
         raise ValueError("Unsupported model export format")
+    payload["pre_processor"].setdefault("center_crop", None)
     return payload
 
 

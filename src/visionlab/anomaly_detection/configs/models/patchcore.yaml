@@ -1,0 +1,17 @@
+# src/visionlab/anomaly_detection/configs/models/patchcore.yaml: local PatchCore and fixed memory-bank fitting epoch
+# Pass --data <name> before --model patchcore.
+model:
+  class_path: visionlab.anomaly_detection.models.patchcore.lightning_model.PatchcoreLitModel
+  init_args:
+    backbone: wide_resnet50_2
+    layers: [layer2, layer3]
+    pre_trained: true
+    coreset_sampling_ratio: 0.1
+    num_neighbors: 9
+    visualizer: false
+
+# PatchCore pins one fitting epoch, an exception to the shared ten-epoch budget (D-22).
+trainer:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

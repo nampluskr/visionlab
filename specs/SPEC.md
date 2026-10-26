@@ -13,7 +13,7 @@
 | FR-5 | 같은 state·입력에서 순수 모델의 raw 출력이 anomalib 원본과 일치한다 | score·map의 allclose 결과 기록. 허용 오차는 실험 전에 확정 |
 | FR-6 | 이식한 LightningModule(예: `StfpmLitModel` 인자 6개, `EfficientAdLitModel` 인자 11개, D-18)의 생성자 인자 이름·순서·기본값이 anomalib 2.0.0과 같다 | `inspect.signature` 비교 일치 |
 | FR-7 | PreProcessor·PostProcessor·Evaluator·Visualizer 인자는 `True`·`False`·visionlab 객체를 받고, `None`·잘못된 타입은 오류를 낸다 | 네 경우 각각의 테스트 |
-| FR-8 | PreProcessor는 STFPM에 ImageNet 정규화를 1회 적용하고 EfficientAD에는 외부 정규화를 적용하지 않는다. train·valid·test·predict에서 같다 | 단계별 최종 forward 입력값 비교 |
+| FR-8 | PreProcessor는 STFPM에 ImageNet 정규화를 1회 적용하고 EfficientAD에는 외부 정규화를 적용하지 않는다. 선택 인자 `center_crop`(기본 `None`, PatchCore용)으로 중앙 crop도 할 수 있으며 기존 모델 동작은 바뀌지 않는다. train·valid·test·predict에서 같다 | 단계별 최종 forward 입력값 비교 |
 | FR-9 | PostProcessor 보정 상태는 fit validation에서만 확정된다. standalone validate·test·predict 전후 상태가 같고, 후처리 전후 raw tensor가 바뀌지 않는다 | 상태 전후 비교, raw 불변 테스트 |
 | FR-10 | Evaluator는 valid에서 raw Image·Pixel AUROC, test에서 raw AUROC와 후처리 F1을 계산한다. valid/test 상태가 분리되고, 계산 불가 시 0 대신 사유를 남긴다 | 두 epoch 연속 실행, 배치 분할 변경 시 지표 일치, 단일 클래스 사례 테스트 |
 | FR-11 | Visualizer는 기본 활성이며 test·predict 결과를 PNG로 저장한다. sample ID별 경로로 파일 충돌이 없다 | 생성 파일 수 = 샘플 수, 같은 basename 다른 범주 구분 |

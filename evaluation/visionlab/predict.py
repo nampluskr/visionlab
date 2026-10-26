@@ -44,7 +44,7 @@ def latest_export(model, data, category):
 def main(args=None):
     """Evaluate the configured pure test split and save explicit metric failure reasons."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore"), required=True)
     parser.add_argument("--data", choices=("mvtec", "visa"), required=True)
     parser.add_argument("--export")
     parser.add_argument("--category")
@@ -81,6 +81,8 @@ def main(args=None):
                ("pixel_AUROC_normalized", AUROC(), "normalized_anomaly_map", "mask")]
     for images, target in loader:
         outputs = predictor.predict(images)
+        if target.get("mask") is not None:
+            target["mask"] = predictor.pre_processor.crop(target["mask"])
         for _, metric, prediction, truth in metrics:
             if outputs.get(prediction) is not None and target.get(truth) is not None:
                 metric.update(outputs[prediction], target[truth])

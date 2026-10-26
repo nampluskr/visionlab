@@ -34,7 +34,7 @@
 
 ## D-6. Dataset과 PreProcessor의 전처리 분담
 
-- **선택**: Dataset Transform은 RGB 변환·이미지와 mask의 공간 변환·float 변환을 맡는다. PreProcessor는 Wrapper에서 입력 확인과 모델별 정규화를 맡는다. STFPM은 ImageNet 정규화를 1회 적용하고, EfficientAD는 외부 정규화를 하지 않는다.
+- **선택**: Dataset Transform은 RGB 변환·이미지와 mask의 공간 변환·float 변환을 맡는다. PreProcessor는 Wrapper에서 입력 확인과 모델별 정규화를 맡는다. STFPM은 ImageNet 정규화를 1회 적용하고, EfficientAD는 외부 정규화를 하지 않는다. PreProcessor는 선택 인자 `center_crop`(기본 `None`)으로 중앙 crop도 할 수 있다. PatchCore 레퍼런스의 Resize와 CenterCrop을 재현하기 위한 것이며(Phase 6), 값을 주지 않는 기존 모델의 동작은 바뀌지 않는다.
 - **근거**: 서로 다른 원본 해상도를 collate 전에 같은 크기로 맞추고, 모델별 정규화는 모델 호출 경로에서 통제한다. 독립 추론도 같은 두 단계를 조합해 이중 resize·정규화를 막는다.
 - **배제한 대안**: lightning-tutorial v0.2의 Dataset 내 정규화. anomalib처럼 PreProcessor가 resize·정규화를 함께 하고 Callback을 상속하는 방식.
 
@@ -272,3 +272,11 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **근거**: Phase 4 DFM의 visa/candle에서 모델 출력은 같았다(FR-5 최대 차이 0.0, F1 일치). 그런데 raw 값 0.9606과 레퍼런스 0.7487이 0.2119 달랐다. anomalib의 정규화 점수에서 pixel의 97.8%가 0.0으로 clamp되어 동점이 생기기 때문이다. 같은 정의로 비교하면 visionlab 0.748692, 레퍼런스 0.748692로 일치한다. 사용자 결정(2026-10-26)이다.
 - **남은 한계**: 레퍼런스의 raw 값은 구하지 않았다. 사용자가 추가 실행 없이 Phase를 닫기로 했으므로, raw 정의의 비교는 출력 일치(FR-5)와 정규화 값 일치에서 추론한 것이다. 점수 규모가 큰 모델(Phase 5 DFKDE, Phase 9 FRE 등)에서 같은 차이가 반복될 수 있다.
 - **배제한 대안**: raw AUROC를 기준으로 하고 레퍼런스의 raw 값을 따로 구해 비교하는 방식(레퍼런스 평가를 추가로 실행해야 한다). 미충족으로 두고 기준 정의를 바꾸는 방식(차이가 구현이 아니라 지표 정의에서 나오므로 Phase가 막히기만 한다).
+
+## D-25. scikit-learn을 coreset 적합 때만 쓰는 지연 외부 의존으로 허용한다
+
+- **선택**: PatchCore의 `SparseRandomProjection`은 원본처럼 `sklearn.utils.random.sample_without_replacement`를 쓴다. 독립 구현하지 않고, 이 import를 `_sparse_random_matrix` 함수 안(밀도가 1이 아닌 분기)으로 옮긴다(Phase 6, 사용자 결정 2026-10-26).
+- **적용 범위**: `sample_without_replacement` 한 함수에만 해당한다. metric 계산에 scikit-learn을 쓰지 않는다는 D-20은 그대로다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. 추론 경로는 scikit-learn 없이 import되고 동작한다. `tests/common/test_dependency.py`가 `src/visionlab`에서 허용된 이 import 외의 scikit-learn import가 없음을 검사하고, `tests/06_patchcore`가 scikit-learn을 차단한 자식 프로세스에서 순수 모듈 import와 추론이 성공하고 `fit`만 `ModuleNotFoundError`를 내는 것을 확인한다.
+- **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다(D-23과 같다). scikit-learn은 PyTorch 위의 라이브러리가 아니므로 이 결정은 그 범위를 적합 시점의 예외로 넓혀 읽는다. 배포되는 추론 경로에는 남지 않는다. INTENT는 고치지 않는다.
+- **근거**: 원본 알고리즘 보존(D-18). 독립 구현하면 난수를 소비하는 순서가 달라져 coreset이 레퍼런스와 어긋날 수 있다. 같은 seed에서 native의 memory bank가 레퍼런스와 모든 행이 같았다(Phase 6, bottle 16,385행, capsule 17,169행).
+- **배제한 대안**: numpy나 torch로 `sample_without_replacement`를 독립 구현하는 방식(coreset이 레퍼런스와 어긋날 위험이 있다). 모듈 최상단에서 import하는 방식(추론 환경에도 scikit-learn이 필요해진다).

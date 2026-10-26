@@ -25,5 +25,6 @@ Example:
 # SPDX-License-Identifier: Apache-2.0
 
 from .pca import PCA
+from .random_projection import SparseRandomProjection
 
-__all__ = ["PCA"]
+__all__ = ["PCA", "SparseRandomProjection"]

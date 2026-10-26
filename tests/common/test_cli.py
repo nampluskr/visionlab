@@ -191,3 +191,22 @@ def test_dfkde_config_merging_and_output_name(tmp_path, cli_assets):
     assert cli.model.visualizer is None
     assert [entry[0] for entry in cli.model.evaluator.test_metrics] == ["image_AUROC", "image_F1Score"]
     assert cli.trainer.default_root_dir.endswith(os.path.join("dfkde", "mvtec_bottle", "v0"))
+
+
+def test_patchcore_config_merging_and_output_name(tmp_path, cli_assets):
+    """Merge PatchCore defaults and fixed fitting arguments with a small locally mapped backbone."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "patchcore.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["init_args"]["backbone"] == "wide_resnet50_2"
+    cli = LitCLI(args=["--data", "mvtec", "--model", "patchcore", "--model.init_args.backbone", "resnet18",
+                       "--trainer.max_epochs", "5", "--trainer.num_sanity_val_steps", "2",
+                       "--trainer.gradient_clip_val", "5", "--trainer.default_root_dir", os.path.join(tmp_path, "runs"),
+                       "--trainer.accelerator", "cpu", "--trainer.devices", "1", "--trainer.logger", "false"], run=False)
+    assert cli.trainer.max_epochs == 1 and cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.layers == ["layer2", "layer3"] and cli.model.num_neighbors == 9
+    assert cli.model.coreset_sampling_ratio == 0.1 and cli.model.visualizer is None
+    assert cli.model.pre_processor.center_crop == (224, 224)
+    assert cli.trainer.default_root_dir.endswith(os.path.join("patchcore", "mvtec_bottle", "v0"))

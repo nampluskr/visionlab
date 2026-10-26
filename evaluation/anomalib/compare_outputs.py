@@ -22,10 +22,11 @@ import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Dfkde, Dfm, EfficientAd, Padim, Stfpm
+from anomalib.models import Dfkde, Dfm, EfficientAd, Padim, Patchcore, Stfpm
 from anomalib.models.image.dfkde.torch_model import DfkdeModel as ReferenceDfkdeModel
 from anomalib.models.image.dfm.torch_model import DFMModel as ReferenceDFMModel
 from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
+from anomalib.models.image.patchcore.torch_model import PatchcoreModel as ReferencePatchcoreModel
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
 
 from visionlab.anomaly_detection.common.metric import AUROC, F1
@@ -43,6 +44,8 @@ from visionlab.anomaly_detection.models.dfm.lightning_model import DfmLitModel
 from visionlab.anomaly_detection.models.dfm.model import DFMModel
 from visionlab.anomaly_detection.models.dfkde.lightning_model import DfkdeLitModel
 from visionlab.anomaly_detection.models.dfkde.model import DfkdeModel
+from visionlab.anomaly_detection.models.patchcore.lightning_model import PatchcoreLitModel
+from visionlab.anomaly_detection.models.patchcore.model import PatchcoreModel
 from visionlab.utils.io import file_sha256
 from local_models import LocalEfficientAd
 
@@ -57,6 +60,8 @@ DFM_RTOL = 1e-5
 DFM_ATOL = 1e-6
 DFKDE_RTOL = 1e-5
 DFKDE_ATOL = 1e-6
+PATCHCORE_RTOL = 1e-5
+PATCHCORE_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -502,10 +507,79 @@ def compare_dfkde(checks, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_patchcore_forwards(checks, reference, native, data, samples):
+    """Compare PatchCore scores and maps on shared central crops of real resized samples."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD, center_crop=(224, 224))(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 224, 224)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    compare_tensor(checks, f"FR-5 {data} pred_score", expected.pred_score, actual.pred_score,
+                   rtol=PATCHCORE_RTOL, atol=PATCHCORE_ATOL)
+    compare_tensor(checks, f"FR-5 {data} anomaly_map", expected.anomaly_map, actual.anomaly_map,
+                   rtol=PATCHCORE_RTOL, atol=PATCHCORE_ATOL)
+
+
+def compare_patchcore(checks, samples, reference_checkpoint):
+    """Compare PatchCore signatures, local weights and shared checkpoint or synthetic memory banks."""
+    record_check(checks, "FR-6 constructor signature",
+                 signature_fields(Patchcore) == signature_fields(PatchcoreLitModel),
+                 {"reference": signature_fields(Patchcore), "native": signature_fields(PatchcoreLitModel)})
+    reference = Patchcore(backbone="wide_resnet50_2", pre_trained=True, pre_processor=False,
+                          post_processor=False, evaluator=False, visualizer=False)
+    native = PatchcoreLitModel(backbone="wide_resnet50_2", pre_trained=True, pre_processor=False,
+                               post_processor=False, evaluator=False, visualizer=False)
+    expected = reference.model.feature_extractor.state_dict()
+    actual = native.model.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    pure_reference = ReferencePatchcoreModel(layers=("layer2", "layer3"), backbone="wide_resnet50_2", pre_trained=False)
+    pure_native = PatchcoreModel(layers=("layer2", "layer3"), backbone="wide_resnet50_2", pre_trained=False)
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+    else:
+        state = reference.model.state_dict()
+        # A shared synthetic bank isolates forward equivalence from stochastic coreset selection.
+        state["memory_bank"] = torch.randn(64, 1536, generator=torch.Generator().manual_seed(42))
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared memory bank strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "synthetic",
+                  "memory_bank_shape": list(state["memory_bank"].shape)})
+    del reference, native, state, expected, actual
+    if reference_checkpoint:
+        del checkpoint
+    for data in ("mvtec", "visa"):
+        try:
+            compare_patchcore_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -519,8 +593,15 @@ def main():
         rtol, atol = DFM_RTOL, DFM_ATOL
     elif args.model == "dfkde":
         rtol, atol = DFKDE_RTOL, DFKDE_ATOL
+    elif args.model == "patchcore":
+        rtol, atol = PATCHCORE_RTOL, PATCHCORE_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "dfkde":
+    if args.model == "patchcore":
+        try:
+            compare_patchcore(checks, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "dfkde":
         try:
             compare_dfkde(checks, args.samples, args.reference_checkpoint)
         except Exception as error:
