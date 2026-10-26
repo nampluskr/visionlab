@@ -210,3 +210,27 @@ def test_patchcore_config_merging_and_output_name(tmp_path, cli_assets):
     assert cli.model.coreset_sampling_ratio == 0.1 and cli.model.visualizer is None
     assert cli.model.pre_processor.center_crop == (224, 224)
     assert cli.trainer.default_root_dir.endswith(os.path.join("patchcore", "mvtec_bottle", "v0"))
+
+
+@pytest.mark.parametrize("max_epochs", (None, 5))
+def test_reverse_distillation_config_merging_and_output_name(tmp_path, cli_assets, max_epochs):
+    """Keep shared epochs overridable while enforcing model hooks and its package output folder."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "reverse_distillation.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["init_args"]["backbone"] == "wide_resnet50_2"
+    assert "max_epochs" not in config["trainer"]
+    arguments = ["--data", "mvtec", "--model", "reverse_distillation", "--model.init_args.backbone", "resnet18",
+                 "--trainer.num_sanity_val_steps", "2", "--trainer.gradient_clip_val", "5",
+                 "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                 "--trainer.devices", "1", "--trainer.logger", "false"]
+    if max_epochs is not None:
+        arguments += ["--trainer.max_epochs", str(max_epochs)]
+    cli = LitCLI(args=arguments, run=False)
+    assert cli.trainer.max_epochs == (10 if max_epochs is None else max_epochs)
+    assert cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.layers == ("layer1", "layer2", "layer3") and cli.model.visualizer is None
+    assert cli.model.anomaly_map_mode.value == "add"
+    assert cli.trainer.default_root_dir.endswith(os.path.join("reverse_distillation", "mvtec_bottle", "v0"))

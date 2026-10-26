@@ -20,6 +20,7 @@ LIGHTNING_FILES = {
     "anomaly_detection/models/dfm/lightning_model.py",
     "anomaly_detection/models/dfkde/lightning_model.py",
     "anomaly_detection/models/patchcore/lightning_model.py",
+    "anomaly_detection/models/reverse_distillation/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -74,6 +75,9 @@ def classified_modules():
                 (relative.startswith("anomaly_detection/models/dfm/") and name == "model.py") or \
                 (relative.startswith("anomaly_detection/models/dfkde/") and name == "model.py") or \
                 (relative.startswith("anomaly_detection/models/patchcore/") and name in ("model.py", "anomaly_map.py")) or \
+                (relative.startswith("anomaly_detection/models/reverse_distillation/") and
+                 (name in ("model.py", "anomaly_map.py", "loss.py") or
+                  relative.startswith("anomaly_detection/models/reverse_distillation/components/"))) or \
                 name == "__init__.py":
             group = "pure"
         else:

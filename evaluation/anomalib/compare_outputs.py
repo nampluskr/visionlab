@@ -22,11 +22,13 @@ import yaml
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
-from anomalib.models import Dfkde, Dfm, EfficientAd, Padim, Patchcore, Stfpm
+from anomalib.models import Dfkde, Dfm, EfficientAd, Padim, Patchcore, ReverseDistillation, Stfpm
 from anomalib.models.image.dfkde.torch_model import DfkdeModel as ReferenceDfkdeModel
 from anomalib.models.image.dfm.torch_model import DFMModel as ReferenceDFMModel
 from anomalib.models.image.padim.torch_model import PadimModel as ReferencePadimModel
 from anomalib.models.image.patchcore.torch_model import PatchcoreModel as ReferencePatchcoreModel
+from anomalib.models.image.reverse_distillation.torch_model import ReverseDistillationModel as ReferenceReverseDistillationModel
+from anomalib.models.image.reverse_distillation.anomaly_map import AnomalyMapGenerationMode as ReferenceReverseMode
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
 
 from visionlab.anomaly_detection.common.metric import AUROC, F1
@@ -46,6 +48,9 @@ from visionlab.anomaly_detection.models.dfkde.lightning_model import DfkdeLitMod
 from visionlab.anomaly_detection.models.dfkde.model import DfkdeModel
 from visionlab.anomaly_detection.models.patchcore.lightning_model import PatchcoreLitModel
 from visionlab.anomaly_detection.models.patchcore.model import PatchcoreModel
+from visionlab.anomaly_detection.models.reverse_distillation.lightning_model import ReverseDistillationLitModel
+from visionlab.anomaly_detection.models.reverse_distillation.model import ReverseDistillationModel
+from visionlab.anomaly_detection.models.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
 from visionlab.utils.io import file_sha256
 from local_models import LocalEfficientAd
 
@@ -62,6 +67,8 @@ DFKDE_RTOL = 1e-5
 DFKDE_ATOL = 1e-6
 PATCHCORE_RTOL = 1e-5
 PATCHCORE_ATOL = 1e-6
+REVERSE_DISTILLATION_RTOL = 1e-5
+REVERSE_DISTILLATION_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -576,16 +583,102 @@ def compare_patchcore(checks, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_reverse_distillation_forwards(checks, reference, native, data, samples):
+    """Compare Reverse Distillation raw outputs on shared normalized 256-pixel real samples."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(
+        torch.stack([dataset[index][0] for index in range(count)]))
+    assert images.shape[1:] == (3, 256, 256)
+    record_check(checks, f"FR-5 {data} inputs", True,
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images.clone()), native(images.clone())
+    compare_tensor(checks, f"FR-5 {data} pred_score", expected.pred_score, actual.pred_score,
+                   rtol=REVERSE_DISTILLATION_RTOL, atol=REVERSE_DISTILLATION_ATOL)
+    compare_tensor(checks, f"FR-5 {data} anomaly_map", expected.anomaly_map, actual.anomaly_map,
+                   rtol=REVERSE_DISTILLATION_RTOL, atol=REVERSE_DISTILLATION_ATOL)
+
+
+def compare_reverse_distillation(checks, information, samples, reference_checkpoint):
+    """Compare signatures, local encoder, shared raw forwards and informational seeded reconstruction weights."""
+    expected_signature = signature_fields(ReverseDistillation, enum_values=True)
+    actual_signature = signature_fields(ReverseDistillationLitModel, enum_values=True)
+    record_check(checks, "FR-6 constructor signature", expected_signature == actual_signature,
+                 {"reference": expected_signature, "native": actual_signature})
+    # The reference needs its default pre-processor to discover input_size.
+    reference = ReverseDistillation(backbone="wide_resnet50_2", pre_trained=True,
+                                    post_processor=False, evaluator=False, visualizer=False)
+    native = ReverseDistillationLitModel(backbone="wide_resnet50_2", pre_trained=True,
+                                         post_processor=False, evaluator=False, visualizer=False)
+    expected, actual = reference.model.encoder.state_dict(), native.model.encoder.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local encoder", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = reference.model.state_dict()
+    del reference, native, expected, actual
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        pure_reference = ReferenceReverseDistillationModel(
+            backbone="wide_resnet50_2", input_size=(256, 256), layers=("layer1", "layer2", "layer3"),
+            anomaly_map_mode=ReferenceReverseMode.ADD, pre_trained=False)
+        torch.random.default_generator.manual_seed(42)
+        pure_native = ReverseDistillationModel(
+            backbone="wide_resnet50_2", input_size=(256, 256), layers=("layer1", "layer2", "layer3"),
+            anomaly_map_mode=AnomalyMapGenerationMode.ADD, pre_trained=False)
+    for branch in ("bottleneck", "decoder"):
+        left, right = getattr(pure_reference, branch).state_dict(), getattr(pure_native, branch).state_dict()
+        mismatches = sorted(name for name in left.keys() & right.keys() if not torch.equal(left[name], right[name]))
+        entry = {"name": f"seeded initial {branch}", "informational_only": True, "seed": 42,
+                 "equal": left.keys() == right.keys() and not mismatches,
+                 "missing": sorted(left.keys() - right.keys()), "unexpected": sorted(right.keys() - left.keys()),
+                 "mismatches": mismatches}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+    del left, right
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "reference random initial state"})
+    del state
+    for data in ("mvtec", "visa"):
+        try:
+            compare_reverse_distillation_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore"), required=True)
+    parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
+                                          "reverse_distillation"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
     if args.samples < 1:
         parser.error("--samples must be positive")
     checks = []
+    information = []
     rtol, atol = (EFFICIENT_AD_RTOL, EFFICIENT_AD_ATOL) if args.model == "efficient_ad" else (RTOL, ATOL)
     if args.model == "padim":
         rtol, atol = PADIM_RTOL, PADIM_ATOL
@@ -595,8 +688,15 @@ def main():
         rtol, atol = DFKDE_RTOL, DFKDE_ATOL
     elif args.model == "patchcore":
         rtol, atol = PATCHCORE_RTOL, PATCHCORE_ATOL
+    elif args.model == "reverse_distillation":
+        rtol, atol = REVERSE_DISTILLATION_RTOL, REVERSE_DISTILLATION_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "patchcore":
+    if args.model == "reverse_distillation":
+        try:
+            compare_reverse_distillation(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "patchcore":
         try:
             compare_patchcore(checks, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -629,6 +729,8 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
+    if args.model == "reverse_distillation":
+        report["information"] = information
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as stream:

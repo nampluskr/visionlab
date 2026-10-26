@@ -1,0 +1,14 @@
+# src/visionlab/anomaly_detection/configs/models/reverse_distillation.yaml: native Reverse Distillation with local encoder
+# Pass --data <name> before --model reverse_distillation.
+model:
+  class_path: visionlab.anomaly_detection.models.reverse_distillation.lightning_model.ReverseDistillationLitModel
+  init_args:
+    backbone: wide_resnet50_2
+    layers: [layer1, layer2, layer3]
+    pre_trained: true
+    visualizer: false
+
+# Keep the shared ten-epoch budget without a model override (D-22).
+trainer:
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0
