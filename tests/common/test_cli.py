@@ -13,6 +13,33 @@ from visionlab.utils import io as io_utils
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.mark.parametrize("max_epochs", (None, 5))
+def test_draem_config_merging_beta_and_output_name(tmp_path, max_epochs):
+    """Merge DRAEM after MVTec with tuple beta, shared epochs and explicit budget overrides."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "draem.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["init_args"]["beta"] == [0.1, 1.0]
+    assert config["model"]["init_args"]["anomaly_source_path"] == "D:/datasets/dtd/images"
+    assert "max_epochs" not in config["trainer"]
+    arguments = ["--data", "mvtec", "--model", "draem",
+                 "--trainer.num_sanity_val_steps", "2", "--trainer.gradient_clip_val", "5",
+                 "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                 "--trainer.devices", "1", "--trainer.logger", "false"]
+    if max_epochs is not None:
+        arguments += ["--trainer.max_epochs", str(max_epochs)]
+    cli = LitCLI(args=arguments, run=False)
+    assert cli.trainer.max_epochs == (10 if max_epochs is None else max_epochs)
+    assert cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.model.augmenter.blend_factor == (0.1, 1.0)
+    assert type(cli.model.augmenter.blend_factor) is tuple
+    assert cli.model.teacher_weights_path is None and cli.model.pre_processor.mean is None
+    assert cli.model.visualizer is None and not cli.model.sspcab
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.trainer.default_root_dir.endswith(os.path.join("draem", "mvtec_bottle", "v0"))
+
+
 @pytest.fixture(scope="module")
 def cli_helpers():
     """Reuse the native asset and image builders without changing import paths."""

@@ -259,13 +259,13 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다). FRE에 원본의 220 epoch를 그대로 쓰는 방식(시간이 길다. Phase 9에서 처음 정한 뒤 사용자가 철회했다). 임의의 N epoch로 절충하는 방식(근거가 없다).
 - **남은 한계**: FRE는 원본이 고정한 220 epoch가 아니라 10 epoch로 학습한 결과를 비교하므로 원본이 의도한 수렴 상태의 성능은 확인하지 않았다(Phase 9).
 
-## D-23. kornia를 순수 모델의 외부 의존으로 허용한다
+## D-23. kornia를 순수 모델과 학습 손실의 외부 의존으로 허용한다
 
-- **선택**: PaDiM의 `GaussianBlur2d`는 원본처럼 kornia(0.8.2)를 import한다. 독립 구현하지 않는다(Phase 3, 사용자 결정 2026-10-25).
-- **적용 범위**: kornia에만 해당한다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. kornia는 `src/visionlab`에서 순수 모델 쪽(`model.py`와 `components/`)에만 쓰고, 배포 환경에도 설치되어 있어야 한다.
+- **선택**: PaDiM의 `GaussianBlur2d`는 원본처럼 kornia(0.8.2)를 import한다. 독립 구현하지 않는다(Phase 3, 사용자 결정 2026-10-25). DRAEM의 `DraemLoss`도 원본처럼 kornia의 `FocalLoss`와 `SSIMLoss`를 import한다(Phase 11, 사용자 결정 2026-10-27).
+- **적용 범위**: kornia에만 해당한다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. kornia는 `src/visionlab`에서 순수 모델 쪽(`model.py`와 `components/`)과 DRAEM의 학습 전용 손실(`models/draem/loss.py`)에만 쓰고, 배포 환경에도 설치되어 있어야 한다. 현재 kornia를 import하는 곳은 `components/filters/blur.py`와 `models/draem/loss.py` 두 파일이다. `loss.py`는 `draem/lightning_model.py`만 import하며 `Predictor`와 export 경로(`draem/model.py`, `utils/io.py`)는 import하지 않는다.
 - **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다. kornia는 PyTorch 위의 라이브러리이므로 이 결정은 그 범위를 PyTorch 생태계 패키지까지 넓혀 읽는다. INTENT는 고치지 않는다.
-- **근거**: 원본 알고리즘 보존(D-18)과 FR-5 일치 검증의 범위를 줄인다.
-- **배제한 대안**: `GaussianBlur2d`를 순수 torch로 독립 구현하는 방식(검증 대상이 늘고 원본과 어긋날 위험이 있다).
+- **근거**: 원본 알고리즘 보존(D-18)과 FR-5 일치 검증의 범위를 줄인다. DRAEM의 손실은 원본이 kornia의 `FocalLoss`와 `SSIMLoss`로 계산하며, 학습 전용이라 추론 경로에 남지 않는다.
+- **배제한 대안**: `GaussianBlur2d`를 순수 torch로 독립 구현하는 방식(검증 대상이 늘고 원본과 어긋날 위험이 있다). `FocalLoss`와 `SSIMLoss`를 독립 구현하는 방식(같은 이유).
 
 ## D-24. 레퍼런스 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다
 

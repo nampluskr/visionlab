@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import torch
 import yaml
+from jsonargparse import ArgumentParser
 from anomalib.data import ImageBatch
 from anomalib.metrics import AUROC as ReferenceAUROC
 from anomalib.metrics import F1AdaptiveThreshold, F1Score
@@ -37,6 +38,10 @@ from anomalib.models.image.patchcore.torch_model import PatchcoreModel as Refere
 from anomalib.models.image.reverse_distillation.torch_model import ReverseDistillationModel as ReferenceReverseDistillationModel
 from anomalib.models.image.reverse_distillation.anomaly_map import AnomalyMapGenerationMode as ReferenceReverseMode
 from anomalib.post_processing import PostProcessor as ReferencePostProcessor
+from anomalib.models import Draem
+from anomalib.models.image.draem.torch_model import DraemModel as ReferenceDraemModel
+from anomalib.models.image.draem.loss import DraemLoss as ReferenceDraemLoss
+from anomalib.data.utils.generators.perlin import PerlinAnomalyGenerator as ReferencePerlinAnomalyGenerator
 
 from visionlab.anomaly_detection.common.metric import AUROC, F1
 from visionlab.anomaly_detection.common.post_processor import PostProcessor
@@ -68,6 +73,10 @@ from visionlab.anomaly_detection.models.supersimplenet.model import Supersimplen
 from visionlab.anomaly_detection.models.supersimplenet.anomaly_generator import AnomalyGenerator
 from visionlab.anomaly_detection.models.supersimplenet.loss import SSNLoss
 from visionlab.utils.io import file_sha256
+from visionlab.anomaly_detection.common.perlin import PerlinAnomalyGenerator
+from visionlab.anomaly_detection.models.draem.lightning_model import DraemLitModel
+from visionlab.anomaly_detection.models.draem.model import DraemModel
+from visionlab.anomaly_detection.models.draem.loss import DraemLoss
 from local_models import LocalCfa, LocalEfficientAd
 
 RTOL = 1e-4
@@ -91,6 +100,8 @@ FRE_RTOL = 1e-5
 FRE_ATOL = 1e-6
 SUPERSIMPLENET_RTOL = 1e-5
 SUPERSIMPLENET_ATOL = 1e-6
+DRAEM_RTOL = 1e-5
+DRAEM_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -991,11 +1002,131 @@ def compare_supersimplenet(checks, information, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_draem_forwards(checks, reference, native, state, images, augmented, mask, prefix):
+    """Restore BatchNorm state separately for training and evaluation comparisons."""
+    for model in (reference, native):
+        model.load_state_dict(state, strict=True)
+        model.train()
+    with torch.no_grad():
+        expected_reconstruction, expected_prediction = reference(augmented)
+        actual_reconstruction, actual_prediction = native(augmented)
+        expected_loss = ReferenceDraemLoss().to(images.device)(
+            images, expected_reconstruction, mask, expected_prediction,
+        )
+        actual_loss = DraemLoss().to(images.device)(images, actual_reconstruction, mask, actual_prediction)
+    for name, expected, actual in (
+        ("train reconstruction", expected_reconstruction, actual_reconstruction),
+        ("train prediction", expected_prediction, actual_prediction), ("loss", expected_loss, actual_loss),
+    ):
+        compare_tensor(checks, f"{prefix} {name}", expected, actual, rtol=DRAEM_RTOL, atol=DRAEM_ATOL)
+    for model in (reference, native):
+        model.load_state_dict(state, strict=True)
+        model.eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+    for name in ("pred_score", "anomaly_map"):
+        compare_tensor(checks, f"{prefix} eval {name}", getattr(expected, name), getattr(actual, name),
+                       rtol=DRAEM_RTOL, atol=DRAEM_ATOL)
+    count, _, height, width = images.shape
+    record_check(checks, f"{prefix} eval shapes",
+                 actual.pred_score.shape == expected.pred_score.shape == (count,) and
+                 actual.anomaly_map.shape == expected.anomaly_map.shape == (count, height, width),
+                 {"pred_score": list(actual.pred_score.shape), "anomaly_map": list(actual.anomaly_map.shape)})
+
+
+def compare_draem(checks, information, samples, reference_checkpoint):
+    """Compare DRAEM YAML beta, seeded synthesis and shared-state forwards on MVTec only."""
+    record_check(checks, "FR-6 constructor signature", signature_fields(Draem) == signature_fields(DraemLitModel),
+                 {"reference": signature_fields(Draem), "native": signature_fields(DraemLitModel)})
+    config_path = os.path.join(PROJECT_ROOT, "evaluation", "anomalib", "models", "11_draem.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        options = yaml.safe_load(stream)["model"]["init_args"]
+    source_path = options["anomaly_source_path"]
+    parser = ArgumentParser()
+    parser.add_class_arguments(Draem, "model")
+    parsed = parser.parse_object({"model": {
+        "anomaly_source_path": source_path, "beta": options["beta"], "pre_processor": False,
+        "post_processor": False, "evaluator": False, "visualizer": False,
+    }})
+    with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+        torch.manual_seed(42)
+        reference = parser.instantiate_classes(parsed).model
+        torch.manual_seed(42)
+        native = DraemLitModel(anomaly_source_path=source_path, beta=options["beta"],
+                               pre_processor=False, post_processor=False, evaluator=False, visualizer=False)
+    record_check(checks, "beta YAML tuple",
+                 isinstance(reference.augmenter.blend_factor, tuple) and
+                 isinstance(native.augmenter.blend_factor, tuple) and
+                 reference.augmenter.blend_factor == native.augmenter.blend_factor,
+                 {"reference": reference.augmenter.blend_factor, "native": native.augmenter.blend_factor})
+    left, right = reference.model.state_dict(), native.model.state_dict()
+    mismatches = sorted(name for name in left.keys() & right.keys() if not torch.equal(left[name], right[name]))
+    entry = {"name": "seeded DRAEM initialization", "informational_only": True, "seed": 42,
+             "equal": left.keys() == right.keys() and not mismatches, "mismatches": mismatches,
+             "reference_solarize_threshold": reference.augmenter.augmenters.transforms[4].threshold,
+             "native_solarize_threshold": native.augmenter.augmenters.transforms[4].threshold,
+             "solarize_equal": reference.augmenter.augmenters.transforms[4].threshold ==
+                               native.augmenter.augmenters.transforms[4].threshold}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = {name: value.clone() for name, value in left.items()}
+    del reference, native, left, right
+    with open(os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", "mvtec.yaml"),
+              encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset = MVTecDataset(root=config["root"], category=config["category"], split="test")
+    if len(dataset) < samples:
+        raise ValueError(f"Expected {samples} MVTec samples, found {len(dataset)}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    images = torch.stack([dataset[index][0] for index in range(samples)]).to(device)
+    record_check(checks, "FR-5 mvtec inputs",
+                 images.shape == (samples, 3, 256, 256) and
+                 images.min() >= -DRAEM_ATOL and images.max() <= 1 + DRAEM_ATOL,
+                 {"device": str(device), "category": config["category"],
+                  "shape": list(images.shape), "min": images.min().item(), "max": images.max().item(),
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:samples]]})
+    pure_reference, pure_native = ReferenceDraemModel().to(device), DraemModel().to(device)
+    record_check(checks, "FR-5 shared state source", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "reference initial state"})
+    for path in (None, source_path):
+        label = "noise" if path is None else "DTD"
+        with torch.random.fork_rng(devices=list(range(torch.cuda.device_count()))):
+            torch.manual_seed(42)
+            reference_generator = ReferencePerlinAnomalyGenerator(anomaly_source_path=path, blend_factor=(0.1, 1.0))
+            torch.manual_seed(42)
+            native_generator = PerlinAnomalyGenerator(anomaly_source_path=path, blend_factor=(0.1, 1.0))
+            torch.manual_seed(43)
+            expected_augmented, expected_mask = reference_generator(images)
+            torch.manual_seed(43)
+            actual_augmented, actual_mask = native_generator(images)
+        compare_tensor(checks, f"augmentation {label} image", expected_augmented, actual_augmented,
+                       rtol=DRAEM_RTOL, atol=DRAEM_ATOL)
+        compare_tensor(checks, f"augmentation {label} mask", expected_mask, actual_mask,
+                       rtol=DRAEM_RTOL, atol=DRAEM_ATOL)
+        compare_draem_forwards(checks, pure_reference, pure_native, state, images, expected_augmented, expected_mask,
+                               f"FR-5 mvtec {label}")
+    del pure_reference, pure_native, state
+    torch.manual_seed(42)
+    pure_reference = ReferenceDraemModel(sspcab=True).to(device)
+    pure_native = DraemModel(sspcab=True).to(device)
+    state = {name: value.detach().cpu().clone() for name, value in pure_reference.state_dict().items()}
+    compare_draem_forwards(checks, pure_reference, pure_native, state, images, expected_augmented, expected_mask,
+                           "SSPCAB mvtec")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -1020,8 +1151,15 @@ def main():
         rtol, atol = FRE_RTOL, FRE_ATOL
     elif args.model == "supersimplenet":
         rtol, atol = SUPERSIMPLENET_RTOL, SUPERSIMPLENET_ATOL
+    elif args.model == "draem":
+        rtol, atol = DRAEM_RTOL, DRAEM_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "supersimplenet":
+    if args.model == "draem":
+        try:
+            compare_draem(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "DRAEM construction / augmentation / FR-5", False, f"{type(error).__name__}: {error}")
+    elif args.model == "supersimplenet":
         try:
             compare_supersimplenet(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -1074,8 +1212,10 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem"):
         report["information"] = information
+    if args.model == "draem":
+        report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as stream:

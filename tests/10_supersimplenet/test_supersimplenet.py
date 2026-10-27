@@ -392,7 +392,7 @@ assert not {"anomalib", "lightning", "pytorch_lightning"} & set(sys.modules)
 
 
 def test_ssn_original_headers_and_perlin_function_only():
-    """Preserve model and Perlin licenses while excluding the future Perlin transform class."""
+    """Preserve licenses and the noise function alongside the Phase 11 Perlin transform."""
     root = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection")
     for name in ("__init__.py", "model.py", "anomaly_generator.py", "loss.py"):
         with open(os.path.join(root, "models", "supersimplenet", name), encoding="utf-8") as stream:
@@ -403,4 +403,4 @@ def test_ssn_original_headers_and_perlin_function_only():
     with open(os.path.join(root, "common", "perlin.py"), encoding="utf-8") as stream:
         source = stream.read()
     assert "# Copyright (C) 2022-2025 Intel Corporation" in source and "# SPDX-License-Identifier: Apache-2.0" in source
-    assert "class PerlinAnomalyGenerator" not in source and "from pathlib" not in source and "import torchvision" not in source
+    assert "def generate_perlin_noise(" in source

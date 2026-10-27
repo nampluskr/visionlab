@@ -1,0 +1,14 @@
+# src/visionlab/anomaly_detection/configs/models/draem.yaml: native DRAEM with local anomaly source images
+# Pass --data <name> before --model draem.
+model:
+  class_path: visionlab.anomaly_detection.models.draem.lightning_model.DraemLitModel
+  init_args:
+    enable_sspcab: false
+    sspcab_lambda: 0.1
+    anomaly_source_path: D:/datasets/dtd/images
+    beta: [0.1, 1.0]
+    visualizer: false
+
+trainer:
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

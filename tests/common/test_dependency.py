@@ -29,6 +29,7 @@ LIGHTNING_FILES = {
     "anomaly_detection/models/cfa/lightning_model.py",
     "anomaly_detection/models/fre/lightning_model.py",
     "anomaly_detection/models/supersimplenet/lightning_model.py",
+    "anomaly_detection/models/draem/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -90,6 +91,7 @@ def classified_modules():
                 (relative.startswith("anomaly_detection/models/fre/") and name == "model.py") or \
                 (relative.startswith("anomaly_detection/models/supersimplenet/") and
                  name in ("model.py", "anomaly_generator.py", "loss.py")) or \
+                (relative.startswith("anomaly_detection/models/draem/") and name in ("model.py", "loss.py")) or \
                 name == "__init__.py":
             group = "pure"
         else:
