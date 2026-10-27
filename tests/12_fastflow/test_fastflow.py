@@ -331,6 +331,7 @@ def test_fastflow_freia_import_locations():
         "anomaly_detection/models/fastflow/model.py",
         "anomaly_detection/models/components/flow/all_in_one_block.py",
         "anomaly_detection/models/cflow/utils.py",
+        "anomaly_detection/models/uflow/model.py",
     }
 
 

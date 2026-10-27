@@ -106,6 +106,8 @@ FASTFLOW_RTOL = 1e-5
 FASTFLOW_ATOL = 1e-6
 CFLOW_RTOL = 1e-5
 CFLOW_ATOL = 1e-6
+UFLOW_RTOL = 1e-5
+UFLOW_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -1331,11 +1333,124 @@ def compare_cflow(checks, information, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_uflow_forwards(checks, reference, native, data, samples):
+    """Compare shared-state UFlow inference, training latents and loss on one normalized real-image batch."""
+    from anomalib.models.image.uflow.loss import UFlowLoss as ReferenceUFlowLoss
+    from visionlab.anomaly_detection.models.uflow.loss import UFlowLoss
+
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if len(dataset) < samples:
+        raise ValueError(f"Expected at least {samples} {data} test samples, found {len(dataset)}")
+    images = torch.stack([dataset[index][0] for index in range(samples)])
+    record_check(checks, f"FR-5 {data} inputs", images.shape == (samples, 3, 256, 256),
+                 {"root": config["root"], "category": config["category"], "shape": list(images.shape),
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:samples]]})
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(images)
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+        for name in ("pred_score", "anomaly_map"):
+            compare_tensor(checks, f"FR-5 {data} eval {name}", getattr(expected, name), getattr(actual, name),
+                           rtol=UFLOW_RTOL, atol=UFLOW_ATOL)
+        record_check(checks, f"FR-5 {data} eval shapes",
+                     expected.pred_score.shape == actual.pred_score.shape == (samples, 1) and
+                     expected.anomaly_map.shape == actual.anomaly_map.shape == (samples, 1, 256, 256),
+                     {"pred_score": list(actual.pred_score.shape), "anomaly_map": list(actual.anomaly_map.shape)})
+        reference.train()
+        native.train()
+        expected_z, expected_ljd = reference(images)
+        actual_z, actual_ljd = native(images)
+        valid_scales = (isinstance(expected_z, (tuple, list)) and isinstance(actual_z, (tuple, list))
+                        and len(expected_z) == len(actual_z) == 3)
+        record_check(checks, f"FR-5 {data} train scales", valid_scales,
+                     {"reference": len(expected_z), "native": len(actual_z)})
+        if not valid_scales:
+            return
+        for index, (left, right) in enumerate(zip(expected_z, actual_z, strict=True)):
+            compare_tensor(checks, f"FR-5 {data} train z {index}", left, right, rtol=UFLOW_RTOL, atol=UFLOW_ATOL)
+        compare_tensor(checks, f"FR-5 {data} train ljd", expected_ljd, actual_ljd, rtol=UFLOW_RTOL, atol=UFLOW_ATOL)
+        compare_tensor(checks, f"FR-5 {data} train loss", ReferenceUFlowLoss()(expected_z, expected_ljd),
+                       UFlowLoss()(actual_z, actual_ljd), rtol=UFLOW_RTOL, atol=UFLOW_ATOL)
+    record_check(checks, f"FR-5 {data} train backbone eval",
+                 not reference.feature_extractor.feature_extractor.training and
+                 not native.feature_extractor.feature_extractor.training,
+                 {"reference_training": reference.feature_extractor.feature_extractor.training,
+                  "native_training": native.feature_extractor.feature_extractor.training})
+
+
+def compare_uflow(checks, information, samples, reference_checkpoint):
+    """Compare UFlow signatures, local backbone weights, seeded state and shared-state forwards."""
+    from anomalib.models import Uflow
+    from anomalib.models.image.uflow.torch_model import UflowModel as ReferenceUflowModel
+    from anomalib.pre_processing import PreProcessor as ReferencePreProcessor
+    from torchvision.transforms.v2 import Compose, Normalize, Resize
+    from visionlab.anomaly_detection.models.uflow.lightning_model import UflowLitModel
+    from visionlab.anomaly_detection.models.uflow.model import UflowModel
+
+    record_check(checks, "FR-6 constructor signature", signature_fields(Uflow) == signature_fields(UflowLitModel),
+                 {"reference": signature_fields(Uflow), "native": signature_fields(UflowLitModel)})
+    reference = Uflow(
+        backbone="resnet18", flow_steps=4, affine_clamp=2.0, affine_subnet_channels_ratio=1.0, permute_soft=False,
+        pre_processor=ReferencePreProcessor(transform=Compose([
+            Resize((256, 256), antialias=True), Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])), post_processor=False, evaluator=False, visualizer=False,
+    )
+    native = UflowLitModel(backbone="resnet18", post_processor=False, evaluator=False, visualizer=False)
+    expected = reference.model.feature_extractor.feature_extractor.state_dict()
+    actual = native.model.feature_extractor.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = reference.model.state_dict()
+    del reference, native, expected, actual
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        pure_reference = ReferenceUflowModel(input_size=(256, 256), flow_steps=4, backbone="resnet18",
+                                              affine_clamp=2.0, affine_subnet_channels_ratio=1.0, permute_soft=False)
+        torch.random.default_generator.manual_seed(42)
+        pure_native = UflowModel(input_size=(256, 256), flow_steps=4, backbone="resnet18",
+                                 affine_clamp=2.0, affine_subnet_channels_ratio=1.0, permute_soft=False)
+    expected, actual = pure_reference.state_dict(), pure_native.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    entry = {"name": "seeded initial UFlow state", "informational_only": True, "seed": 42,
+             "equal": expected.keys() == actual.keys() and not mismatches,
+             "missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+             "mismatches": mismatches}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    del expected, actual
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "reference initial state"})
+    del state
+    for data in ("mvtec", "visa"):
+        try:
+            compare_uflow_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -1366,8 +1481,15 @@ def main():
         rtol, atol = FASTFLOW_RTOL, FASTFLOW_ATOL
     elif args.model == "cflow":
         rtol, atol = CFLOW_RTOL, CFLOW_ATOL
+    elif args.model == "uflow":
+        rtol, atol = UFLOW_RTOL, UFLOW_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "cflow":
+    if args.model == "uflow":
+        try:
+            compare_uflow(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "cflow":
         try:
             compare_cflow(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -1435,7 +1557,7 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow"):
         report["information"] = information
     if args.model == "draem":
         report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}

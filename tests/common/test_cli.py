@@ -13,6 +13,42 @@ from visionlab.utils import io as io_utils
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.mark.parametrize("data,category", (("mvtec", "bottle"), ("visa", "candle")))
+@pytest.mark.parametrize("max_epochs", (None, 5))
+def test_uflow_config_merging_and_output_name(tmp_path, cli_assets, data, category, max_epochs):
+    """Merge UFlow after each dataset with shared epochs, fixed input size and its own output folder."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "uflow.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["class_path"] == "visionlab.anomaly_detection.models.uflow.lightning_model.UflowLitModel"
+    assert config["model"]["init_args"] == {
+        "backbone": "resnet18", "flow_steps": 4, "affine_clamp": 2.0,
+        "affine_subnet_channels_ratio": 1.0, "permute_soft": False, "visualizer": False,
+    }
+    assert config["trainer"] == {"num_sanity_val_steps": 0}
+    expanded = expand_args(["--data", data, "--model", "uflow"], run=False)
+    configs = [expanded[index + 1] for index, value in enumerate(expanded) if value == "--config"]
+    assert configs == [os.path.join(CONFIG_DIR, "default.yaml"), os.path.join(CONFIG_DIR, "trainer.yaml"),
+                       os.path.join(CONFIG_DIR, "data", f"{data}.yaml"), os.path.join(CONFIG_DIR, "models", "uflow.yaml")]
+    arguments = ["--data", data, "--model", "uflow", "--model.init_args.flow_steps", "1",
+                 "--trainer.num_sanity_val_steps", "2",
+                 "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                 "--trainer.devices", "1", "--trainer.logger", "false"]
+    if max_epochs is not None:
+        arguments += ["--trainer.max_epochs", str(max_epochs)]
+    cli = LitCLI(args=arguments, run=False)
+    assert cli.trainer.max_epochs == (10 if max_epochs is None else max_epochs)
+    assert cli.trainer.num_sanity_val_steps == 0
+    assert cli.model.model.input_size == (256, 256) and cli.model.flow_steps == 1
+    assert cli.model.backbone == "resnet18" and cli.model.affine_clamp == 2.0
+    assert cli.model.affine_subnet_channels_ratio == 1.0 and cli.model.permute_soft is False
+    assert cli.model.automatic_optimization is True and cli.model.visualizer is None
+    assert cli.model.teacher_weights_path == os.path.join(cli_assets, "resnet18.pth")
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.trainer.default_root_dir.endswith(os.path.join("uflow", f"{data}_{category}", "v0"))
+
+
 @pytest.mark.parametrize("data, category", (("mvtec", "bottle"), ("visa", "candle")))
 @pytest.mark.parametrize("max_epochs", (None, 5))
 def test_fastflow_config_merging_and_output_name(tmp_path, cli_assets, data, category, max_epochs):

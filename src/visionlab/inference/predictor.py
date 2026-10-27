@@ -49,7 +49,17 @@ class Predictor:
             model_args["feature_scaling_method"] = FeatureScalingMethod(model_args["feature_scaling_method"])
         elif exported["model_name"] == "reverse_distillation":
             model_args["anomaly_map_mode"] = AnomalyMapGenerationMode(model_args["anomaly_map_mode"])
-        model = models[exported["model_name"]](**model_args)
+        if exported["model_name"] == "uflow":
+            from visionlab.anomaly_detection.models.uflow.model import UflowModel
+
+            model = UflowModel(
+                input_size=tuple(model_args["input_size"]), flow_steps=model_args["flow_steps"],
+                backbone=model_args["backbone"], affine_clamp=model_args["affine_clamp"],
+                affine_subnet_channels_ratio=model_args["affine_subnet_channels_ratio"],
+                permute_soft=model_args["permute_soft"],
+            )
+        else:
+            model = models[exported["model_name"]](**model_args)
         model.load_state_dict(exported["model_state"], strict=True)
         pre_processor = PreProcessor(mean=exported["pre_processor"]["mean"], std=exported["pre_processor"]["std"],
                                      center_crop=exported["pre_processor"]["center_crop"])

@@ -139,6 +139,9 @@ visionlab/                                      # project root
 │   ├── 13_cflow/
 │   │   ├── test_cflow.py                       # pure model, einops equality, D-26
 │   │   └── test_cflow_lightning.py             # FR-6, FR-12, FR-14, D-19, manual optimization
+│   ├── 14_uflow/
+│   │   ├── test_uflow.py                       # pure model, GraphINN graph, D-26
+│   │   └── test_uflow_lightning.py             # FR-6, FR-12, FR-14, D-19, D-26, 256 input (D-27)
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -149,7 +152,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -195,12 +198,19 @@ visionlab/                                      # project root
         │   │   │   ├── lightning_model.py      # StfpmLitModel, native LightningModule
         │   │   │   ├── loss.py                 # STFPMLoss
         │   │   │   └── model.py                # STFPMModel (was torch_model.py)
-        │   │   └── supersimplenet/             # copied from anomalib models/image/supersimplenet (D-18)
+        │   │   ├── supersimplenet/             # copied from anomalib models/image/supersimplenet (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_generator.py    # AnomalyGenerator
+        │   │   │   ├── lightning_model.py      # SupersimplenetLitModel, native LightningModule
+        │   │   │   ├── loss.py                 # SSNLoss
+        │   │   │   └── model.py                # SupersimplenetModel (was torch_model.py)
+        │   │   └── uflow/                      # copied from anomalib models/image/uflow (D-18)
         │   │       ├── __init__.py
-        │   │       ├── anomaly_generator.py    # AnomalyGenerator
-        │   │       ├── lightning_model.py      # SupersimplenetLitModel, native LightningModule
-        │   │       ├── loss.py                 # SSNLoss
-        │   │       └── model.py                # SupersimplenetModel (was torch_model.py)
+        │   │       ├── anomaly_map.py          # AnomalyMapGenerator (scipy, mpmath)
+        │   │       ├── feature_extraction.py   # get_feature_extractor, LayerNormFeatureExtractor, CaitFeatureExtractor
+        │   │       ├── lightning_model.py      # UflowLitModel, native LightningModule, 256 input (D-27)
+        │   │       ├── loss.py                 # UFlowLoss
+        │   │       └── model.py                # UflowModel, imports FrEIA GraphINN (D-26, was torch_model.py)
         │   ├── common/                         # new, replaces anomalib parts outside models (D-7, D-18)
         │   │   ├── batch.py                    # Batch, InferenceBatch (anomalib.data), Phase 0
         │   │   ├── evaluator.py                # Evaluator (anomalib.metrics)
@@ -331,3 +341,11 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **근거**: 원본 알고리즘과 `state_dict` 구조의 보존(D-18). 독립 구현하면 `SequenceINN`·`GraphINN`의 구성과 Jacobian 누적을 새로 검증해야 하고 원본의 난수 소비 순서와 어긋날 위험이 있다. `AllInOneBlock`은 anomalib 복사본이 FrEIA 원본과 달라(hard permutation의 난수원이 `torch.randperm`이고 FrEIA는 `np.random.permutation`이다) FrEIA의 것을 직접 쓰면 레퍼런스와 초기 가중치가 어긋나므로 anomalib 복사본을 쓴다.
 - **배제한 대안**: 공통 flow 블록과 Jacobian 계산의 독립 구현(PLAN 12행의 처음 계획이며 검증 대상이 늘어난다). FrEIA의 `AllInOneBlock`을 직접 쓰는 방식(난수가 어긋난다). FrEIA를 지연 import하는 방식(flow 블록이 모델 구조 자체라 불가능하다).
 - **남은 한계**: 배포 환경 요건이 INTENT의 "PyTorch만"보다 넓어진다(FrEIA 0.2, numpy, scipy). anomalib `AllInOneBlock` 복사본의 `scipy.stats.special_ortho_group` 최상단 import는 원본대로 둔다(`permute_soft=True`일 때만 쓰인다).
+
+## D-27. 원본이 입력 크기를 고정한 모델은 Dataset의 256x256으로 통일한다
+
+- **선택**: 원본이 입력 크기를 고정한 모델(UFlow, 448)은 레퍼런스와 native 모두 visionlab Dataset이 내는 256x256으로 통일해 같은 조건에서 비교한다. 레퍼런스는 모델 yaml의 `pre_processor`(`Resize(256)`과 ImageNet 정규화)로 맞추고 어댑터를 쓰지 않는다. native는 `UflowLitModel`이 `(256, 256)` 상수(`UFLOW_INPUT_SIZE`)로 `UflowModel`을 만든다. 순수 `UflowModel`의 `input_size` 기본값 `(448, 448)`과 알고리즘은 원본 그대로 둔다(Phase 14, 사용자 결정 2026-10-27).
+- **적용 범위**: 원본이 입력 크기를 고정하는 모델에 한한다. 입력 크기가 `Uflow`의 생성자 인자가 아니므로 `UflowLitModel`의 인자 이름·순서·기본값(D-5)은 바뀌지 않는다.
+- **근거**: Dataset이 이미지와 mask를 256으로 고정하고(D-6) `PreProcessor`에 resize가 없다. 데이터 생성자에 `image_size`를 더하는 방식은 D-10이 배제한 대안을 되살리고 데이터 생성자 시그니처 검사(FR-17)와 공유 코드, 데이터 테스트를 바꿔야 한다. 비교의 목적은 같은 조건에서의 이식 정확도이며 레퍼런스도 논문의 기본 backbone(`mcait`)이 아닌 `resnet18`을 쓴다. 256은 학습 시간과 메모리도 줄인다.
+- **배제한 대안**: 데이터 생성자에 `image_size` 추가. 증강 훅으로 resize를 넣는 방식. 모델 안에서 448로 보간하는 방식(원본 알고리즘 변경).
+- **남은 한계**: 원본이 의도한 448 입력의 성능은 확인하지 않았다. 기본 backbone `mcait`와 `wide_resnet50_2`도 확인하지 않았다(로컬 가중치 없음 또는 미실행, Phase 14).
