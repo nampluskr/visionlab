@@ -108,6 +108,8 @@ CFLOW_RTOL = 1e-5
 CFLOW_ATOL = 1e-6
 UFLOW_RTOL = 1e-5
 UFLOW_ATOL = 1e-6
+CSFLOW_RTOL = 1e-5
+CSFLOW_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -1446,11 +1448,183 @@ def compare_uflow(checks, information, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_csflow_forwards(checks, reference, native, data, samples):
+    """Compare shared-state CSFlow evaluation, training tuples and loss on normalized real images."""
+    from anomalib.models.image.csflow.loss import CsFlowLoss as ReferenceCsFlowLoss
+    from visionlab.anomaly_detection.models.csflow.loss import CsFlowLoss
+
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if len(dataset) < samples:
+        raise ValueError(f"Expected at least {samples} {data} test samples, found {len(dataset)}")
+    images = torch.stack([dataset[index][0] for index in range(samples)])
+    record_check(checks, f"FR-5 {data} inputs", images.shape == (samples, 3, 256, 256),
+                 {"root": config["root"], "category": config["category"], "shape": list(images.shape),
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:samples]]})
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(images)
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+        for name in ("pred_score", "anomaly_map"):
+            compare_tensor(checks, f"FR-5 {data} eval {name}", getattr(expected, name), getattr(actual, name),
+                           rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+        record_check(checks, f"FR-5 {data} eval shapes",
+                     expected.pred_score.shape == actual.pred_score.shape == (samples,) and
+                     expected.anomaly_map.shape == actual.anomaly_map.shape == (samples, 1, 256, 256),
+                     {"pred_score": list(actual.pred_score.shape), "anomaly_map": list(actual.anomaly_map.shape)})
+        reference.train()
+        native.train()
+        expected_z, expected_jacobians = reference(images)
+        actual_z, actual_jacobians = native(images)
+        valid_scales = isinstance(expected_z, tuple) and isinstance(actual_z, tuple) and len(expected_z) == len(actual_z) == 3
+        record_check(checks, f"FR-5 {data} train scales", valid_scales,
+                     {"reference": len(expected_z), "native": len(actual_z)})
+        if not valid_scales:
+            return
+        for index, (left, right) in enumerate(zip(expected_z, actual_z, strict=True)):
+            compare_tensor(checks, f"FR-5 {data} train z {index}", left, right, rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+        compare_tensor(checks, f"FR-5 {data} train jacobians", expected_jacobians, actual_jacobians,
+                       rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+        compare_tensor(checks, f"FR-5 {data} train loss", ReferenceCsFlowLoss()(expected_z, expected_jacobians),
+                       CsFlowLoss()(actual_z, actual_jacobians), rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+    record_check(checks, f"FR-5 {data} train backbone eval",
+                 not reference.feature_extractor.feature_extractor.feature_extractor.training and
+                 not native.feature_extractor.feature_extractor.feature_extractor.training,
+                 {"reference_training": reference.feature_extractor.feature_extractor.feature_extractor.training,
+                  "native_training": native.feature_extractor.feature_extractor.feature_extractor.training})
+
+
+def compare_csflow_components(checks):
+    """Compare the original forward-only coupling, permutations, map modes and loss with small tensors."""
+    from anomalib.models.image.csflow import torch_model as reference_module
+    from anomalib.models.image.csflow.anomaly_map import AnomalyMapGenerator as ReferenceMap, AnomalyMapMode as ReferenceMode
+    from anomalib.models.image.csflow.loss import CsFlowLoss as ReferenceLoss
+    from visionlab.anomaly_detection.models.csflow import model as native_module
+    from visionlab.anomaly_detection.models.csflow.anomaly_map import AnomalyMapGenerator, AnomalyMapMode
+    from visionlab.anomaly_detection.models.csflow.loss import CsFlowLoss
+
+    dims = [(304, size, size) for size in (8, 4, 2)]
+    reference = reference_module.ParallelGlowCouplingLayer(dims_in=dims, subnet_args={"channels_hidden": 16}, clamp=3)
+    native = native_module.ParallelGlowCouplingLayer(dims_in=dims, subnet_args={"channels_hidden": 16}, clamp=3)
+    with torch.no_grad():
+        for name, parameter in native.named_parameters():
+            if ".gamma" in name:
+                parameter.fill_(0.25)
+        reference.load_state_dict(native.state_dict(), strict=True)
+        inputs = [torch.randn(2, *shape) for shape in dims]
+        expected, expected_jacobian = reference(inputs, rev=False)
+        actual, actual_jacobian = native(inputs, rev=False)
+        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
+            compare_tensor(checks, f"FR-5 coupling scale {index}", left, right, rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+        compare_tensor(checks, "FR-5 coupling scalar jacobian", expected_jacobian, actual_jacobian,
+                       rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+        for seed in range(4):
+            left = reference_module.ParallelPermute(dims_in=dims, seed=seed)
+            right = native_module.ParallelPermute(dims_in=dims, seed=seed)
+            record_check(checks, f"FR-5 permutation seed {seed}",
+                         all(torch.equal(a, b) for a, b in zip(left.perm, right.perm, strict=True)), {"seed": seed})
+        for mode in ("ALL", "MAX"):
+            left = ReferenceMap(input_dims=(3, 256, 256), mode=ReferenceMode[mode])
+            right = AnomalyMapGenerator(input_dims=(3, 256, 256), mode=AnomalyMapMode[mode])
+            compare_tensor(checks, f"FR-5 anomaly map {mode}", left(inputs), right(inputs),
+                           rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+        jacobians = torch.randn(2)
+        compare_tensor(checks, "FR-5 CsFlowLoss", ReferenceLoss()(inputs, jacobians), CsFlowLoss()(inputs, jacobians),
+                       rtol=CSFLOW_RTOL, atol=CSFLOW_ATOL)
+
+
+def compare_csflow(checks, information, samples, reference_checkpoint):
+    """Check local injection and seeded graphs before reusing two CPU models for strict-state comparisons."""
+    import gc
+
+    from anomalib.models import Csflow
+    from anomalib.models.image.csflow import torch_model as reference_module
+    from local_models import LocalCsflow
+    from visionlab.anomaly_detection.models.csflow.lightning_model import CsflowLitModel
+
+    record_check(checks, "FR-6 constructor signature", signature_fields(Csflow) == signature_fields(CsflowLitModel),
+                 {"reference": signature_fields(Csflow), "native": signature_fields(CsflowLitModel)})
+    weights_file = "D:/backbones/efficientnet_b5_lukemelas-1a07897c.pth"
+    original_factory = reference_module.efficientnet_b5
+    try:
+        with torch.random.fork_rng(devices=[]):
+            torch.random.default_generator.manual_seed(42)
+            wrapper = LocalCsflow(weights_file=weights_file, post_processor=False, evaluator=False, visualizer=False)
+            reference = wrapper.model.cpu()
+            del wrapper
+            torch.random.default_generator.manual_seed(42)
+            wrapper = CsflowLitModel(post_processor=False, evaluator=False, visualizer=False)
+            native = wrapper.model.cpu()
+            teacher_path = wrapper.teacher_weights_path
+            del wrapper
+    finally:
+        # LocalCsflow replaces this module-global factory; keep the adapter's side effect local to this comparison.
+        reference_module.efficientnet_b5 = original_factory
+    local_state = torch.load(weights_file, map_location="cpu", weights_only=True)
+    reference_backbone = reference.feature_extractor.feature_extractor.backbone
+    native_backbone = native.feature_extractor.feature_extractor.backbone
+    actual = native_backbone.state_dict()
+    mismatches = sorted(name for name in actual.keys() & local_state.keys() if not torch.equal(actual[name], local_state[name]))
+    record_check(checks, "FR-23 native local backbone parameters and buffers",
+                 actual.keys() == local_state.keys() and not mismatches,
+                 {"missing": sorted(local_state.keys() - actual.keys()), "unexpected": sorted(actual.keys() - local_state.keys()),
+                  "mismatches": mismatches, "weights": teacher_path, "sha256": file_sha256(teacher_path)})
+    parameters = dict(reference_backbone.named_parameters())
+    mismatches = sorted(name for name, value in parameters.items() if name not in local_state or not torch.equal(value, local_state[name]))
+    record_check(checks, "FR-23 reference local backbone parameters", not mismatches,
+                 {"mismatches": mismatches, "weights": weights_file, "parameter_count": len(parameters)})
+    buffers = dict(reference_backbone.named_buffers())
+    different_buffers = sorted(name for name, value in buffers.items()
+                               if name not in local_state or not torch.equal(value, local_state[name]))
+    entry = {"name": "reference backbone buffers after constructor dry-run", "informational_only": True,
+             "equal": not different_buffers, "buffer_count": len(buffers),
+             "different_buffer_count": len(different_buffers), "different_buffers": different_buffers}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    expected_graph, actual_graph = reference.graph.state_dict(), native.graph.state_dict()
+    mismatches = sorted(name for name in expected_graph.keys() & actual_graph.keys()
+                        if not torch.equal(expected_graph[name], actual_graph[name]))
+    entry = {"name": "seeded initial CSFlow graph state", "informational_only": True, "seed": 42,
+             "equal": expected_graph.keys() == actual_graph.keys() and not mismatches,
+             "missing": sorted(expected_graph.keys() - actual_graph.keys()),
+             "unexpected": sorted(actual_graph.keys() - expected_graph.keys()), "mismatches": mismatches}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    del actual, parameters, buffers, local_state, reference_backbone, native_backbone, expected_graph, actual_graph
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False, mmap=True)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = native.state_dict()
+    reference.load_state_dict(state, strict=True)
+    native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else
+                  "synthetic native initial state with locally injected backbone", "device": "cpu"})
+    del state
+    for data in ("mvtec", "visa"):
+        try:
+            compare_csflow_forwards(checks, reference, native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+    del reference, native
+    gc.collect()
+    compare_csflow_components(checks)
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -1483,8 +1657,15 @@ def main():
         rtol, atol = CFLOW_RTOL, CFLOW_ATOL
     elif args.model == "uflow":
         rtol, atol = UFLOW_RTOL, UFLOW_ATOL
+    elif args.model == "csflow":
+        rtol, atol = CSFLOW_RTOL, CSFLOW_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "uflow":
+    if args.model == "csflow":
+        try:
+            compare_csflow(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "uflow":
         try:
             compare_uflow(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -1557,7 +1738,7 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow"):
         report["information"] = information
     if args.model == "draem":
         report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}

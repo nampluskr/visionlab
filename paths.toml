@@ -10,3 +10,4 @@ wide_resnet50_2 = "D:/backbones/wide_resnet50_2-95faca4d.pth"
 [teachers]
 efficient_ad_small = "D:/backbones/efficientad_pretrained_weights/pretrained_teacher_small.pth"
 efficient_ad_medium = "D:/backbones/efficientad_pretrained_weights/pretrained_teacher_medium.pth"
+csflow_efficientnet_b5 = "D:/backbones/efficientnet_b5_lukemelas-1a07897c.pth"

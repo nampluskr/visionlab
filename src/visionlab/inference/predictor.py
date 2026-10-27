@@ -58,6 +58,15 @@ class Predictor:
                 affine_subnet_channels_ratio=model_args["affine_subnet_channels_ratio"],
                 permute_soft=model_args["permute_soft"],
             )
+        elif exported["model_name"] == "csflow":
+            from visionlab.anomaly_detection.models.csflow.model import CsFlowModel
+
+            model = CsFlowModel(
+                input_size=tuple(model_args["input_size"]),
+                cross_conv_hidden_channels=model_args["cross_conv_hidden_channels"],
+                n_coupling_blocks=model_args["n_coupling_blocks"],
+                clamp=model_args["clamp"], num_channels=model_args["num_channels"],
+            )
         else:
             model = models[exported["model_name"]](**model_args)
         model.load_state_dict(exported["model_state"], strict=True)

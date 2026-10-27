@@ -80,7 +80,7 @@ Phase 1~18의 각 모델 Phase에 적용한다. 각 Phase는 모델 하나를 �
 
 - **대응 요구 ID**: FR-4, FR-5, FR-6, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, NFR-3, NFR-4, NFR-5, NFR-6와 모델별 요구. FR-22, FR-23은 생성자가 pretrained를 읽는 모델에 적용한다(D-19). FR-24, NFR-6은 모든 Phase에 적용한다(D-20, D-21).
 - **완료 조건**:
-  - 레퍼런스: `anomalib_run.py train`과 `models/NN_<name>.yaml`로 category별 Image·Pixel AUROC와 실제 적용된 학습 예산을 그 Phase의 결과 파일에 기록한다(FR-21). 레퍼런스는 데이터셋마다 1회만 실행한다(실행 시간 비용 때문에 2회 반복을 하지 않는다). 에폭별 학습 히스토리(`train_loss_epoch` 등 run 폴더의 로그에 남은 값)도 함께 기록한다.
+  - 레퍼런스: `anomalib_run.py train`과 `models/NN_<name>.yaml`로 category별 Image·Pixel AUROC와 실제 적용된 학습 예산을 그 Phase의 결과 파일에 기록한다(FR-21). 레퍼런스는 데이터셋마다 1회만 실행한다(실행 시간 비용 때문에 2회 반복을 하지 않는다). 다만 `nn.Module` backbone을 공유 `TimmFeatureExtractor`에 넘기는 모델은 생성자의 dry-run이 train 모드에서 미초기화 입력으로 돌아 BatchNorm 통계를 오염시킬 수 있고, 원본 anomalib의 동작이라 오염 크기가 실행마다 달라 결과가 달라질 수 있다. 그런 모델의 레퍼런스 어댑터(`Local*`)는 dry-run을 원본처럼 train 모드로 두어 난수 소비 순서를 맞추고 생성 직후 로컬 가중치를 다시 불러 복원한다(Phase 15에서 사용자 결정으로 레퍼런스를 재실행한 예외). 에폭별 학습 히스토리(`train_loss_epoch` 등 run 폴더의 로그에 남은 값)도 함께 기록한다.
   - 레퍼런스 학습 예산은 공유 yaml을 따른다: 기본 `max_epochs=10`, `val_split_mode="from_test"`, `val_split_ratio=0.4`, `seed=42`(데이터 분할·`seed_everything`), batch 8/8(모델 yaml의 override 우선), `num_workers=0`, `devices=1`, `deterministic="warn"`, `CUBLAS_WORKSPACE_CONFIG=:4096:8`. 모델이 고정하는 `trainer_arguments`가 우선한다. 이식 결과도 같은 예산을 쓴다(D-22).
   - 순수 모델의 평가 출력 shape(FR-4)과 생성자 인자(FR-6)가 판정 방법을 통과한다.
   - 같은 state·입력에서 순수 모델의 raw 출력이 anomalib 원본과 일치한다(FR-5). 허용 오차는 Phase 시작 전에 확정한다.

@@ -142,6 +142,9 @@ visionlab/                                      # project root
 │   ├── 14_uflow/
 │   │   ├── test_uflow.py                       # pure model, GraphINN graph, D-26
 │   │   └── test_uflow_lightning.py             # FR-6, FR-12, FR-14, D-19, D-26, 256 input (D-27)
+│   ├── 15_csflow/
+│   │   ├── test_csflow.py                      # pure model, GraphINN graph, original behavior, D-26
+│   │   └── test_csflow_lightning.py            # FR-6, FR-12, FR-14, D-19, D-26, gradient clipping
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -152,7 +155,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -177,6 +180,12 @@ visionlab/                                      # project root
         │   │   │   │   └── sspcab.py           # copied: SSPCAB
         │   │   │   └── tiling/
         │   │   │       └── tiler.py            # Tiler, new (replaces anomalib.data.utils.tiler)
+        │   │   ├── csflow/                     # copied from anomalib models/image/csflow (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_map.py          # AnomalyMapGenerator, AnomalyMapMode
+        │   │   │   ├── lightning_model.py      # CsflowLitModel, native LightningModule
+        │   │   │   ├── loss.py                 # CsFlowLoss
+        │   │   │   └── model.py                # CsFlowModel, imports FrEIA GraphINN (D-26, was torch_model.py)
         │   │   ├── draem/                      # copied from anomalib models/image/draem (D-18)
         │   │   │   ├── __init__.py
         │   │   │   ├── lightning_model.py      # DraemLitModel, native LightningModule
@@ -336,7 +345,7 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 ## D-26. FrEIA를 flow 계열 순수 모델의 외부 의존으로 허용한다
 
 - **선택**: FastFlow의 `SequenceINN`과 `AllInOneBlock`이 상속하는 `InvertibleModule`은 원본처럼 FrEIA(0.2)에서 import한다. 독립 구현하지 않는다(Phase 12, 사용자 결정 2026-10-27). `AllInOneBlock`은 anomalib의 `all_in_one_block.py`를 D-18대로 복사하고 `InvertibleModule` 등 FrEIA 부품만 FrEIA에서 import한다. FrEIA의 `AllInOneBlock`을 직접 쓰지 않는다. 복사본이 anomalib 외에 쓰는 외부 의존(scipy 등)은 원본대로 둔다.
-- **적용 범위**: FrEIA에만 해당한다. flow 계열 Phase 12~15(FastFlow, CFLOW, UFlow, CSFlow)가 같은 결정을 따른다. 원본 코드에서 확인한 FrEIA 사용처는 FastFlow와 CFLOW의 `SequenceINN`, UFlow의 `GraphINN`·`InputNode`·`Node`·`OutputNode`·`Split`, CSFlow의 `GraphINN`·`InvertibleModule`이다(Phase 13~15는 해당 Phase 시작 때 다시 확인한다). 다른 라이브러리(open_clip 등)는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. FrEIA는 추론 경로에도 필요하다. flow 블록이 모델 구조 자체이고 평가 모드 `forward`가 호출하므로 지연 import로 학습에만 한정할 수 없다. 따라서 배포 환경에 FrEIA와 FrEIA가 요구하는 numpy, scipy가 설치되어 있어야 한다. FrEIA는 Lightning과 anomalib을 import하지 않으므로 NFR-1, NFR-2, FR-14, FR-19의 import 차단 판정은 그대로 유지된다. 각 Phase의 테스트가 순수 모델이 FrEIA는 필요로 하되 Lightning과 anomalib 없이 로딩됨을 격리 프로세스에서 확인한다.
+- **적용 범위**: FrEIA에만 해당한다. flow 계열 Phase 12~15(FastFlow, CFLOW, UFlow, CSFlow)가 같은 결정을 따른다. 원본 코드에서 확인한 FrEIA 사용처는 FastFlow와 CFLOW의 `SequenceINN`, UFlow의 `GraphINN`·`InputNode`·`Node`·`OutputNode`·`Split`, CSFlow의 `GraphINN`·`InvertibleModule`이다(Phase 13~15는 해당 Phase 시작 때 다시 확인한다. Phase 15에서 CSFlow의 사용처가 `GraphINN`, `InvertibleModule`, `InputNode`, `Node`, `OutputNode`임을 확인했고 새 결정은 필요 없다). 다른 라이브러리(open_clip 등)는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. FrEIA는 추론 경로에도 필요하다. flow 블록이 모델 구조 자체이고 평가 모드 `forward`가 호출하므로 지연 import로 학습에만 한정할 수 없다. 따라서 배포 환경에 FrEIA와 FrEIA가 요구하는 numpy, scipy가 설치되어 있어야 한다. FrEIA는 Lightning과 anomalib을 import하지 않으므로 NFR-1, NFR-2, FR-14, FR-19의 import 차단 판정은 그대로 유지된다. 각 Phase의 테스트가 순수 모델이 FrEIA는 필요로 하되 Lightning과 anomalib 없이 로딩됨을 격리 프로세스에서 확인한다.
 - **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다", "PyTorch만 사용할 수 있다"와 긴장 관계에 있다(D-23과 같다). FrEIA는 PyTorch 위에 만든 라이브러리이므로 이 결정은 그 범위를 PyTorch 생태계 패키지까지 넓혀 읽는다. numpy와 scipy는 FrEIA의 요구 사항으로 따라오는 간접 의존이다. INTENT는 고치지 않는다.
 - **근거**: 원본 알고리즘과 `state_dict` 구조의 보존(D-18). 독립 구현하면 `SequenceINN`·`GraphINN`의 구성과 Jacobian 누적을 새로 검증해야 하고 원본의 난수 소비 순서와 어긋날 위험이 있다. `AllInOneBlock`은 anomalib 복사본이 FrEIA 원본과 달라(hard permutation의 난수원이 `torch.randperm`이고 FrEIA는 `np.random.permutation`이다) FrEIA의 것을 직접 쓰면 레퍼런스와 초기 가중치가 어긋나므로 anomalib 복사본을 쓴다.
 - **배제한 대안**: 공통 flow 블록과 Jacobian 계산의 독립 구현(PLAN 12행의 처음 계획이며 검증 대상이 늘어난다). FrEIA의 `AllInOneBlock`을 직접 쓰는 방식(난수가 어긋난다). FrEIA를 지연 import하는 방식(flow 블록이 모델 구조 자체라 불가능하다).

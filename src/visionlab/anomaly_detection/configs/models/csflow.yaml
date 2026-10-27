@@ -1,0 +1,15 @@
+# src/visionlab/anomaly_detection/configs/models/csflow.yaml: native CSFlow with a local EfficientNet-B5 teacher
+# Pass --data <name> before --model csflow.
+model:
+  class_path: visionlab.anomaly_detection.models.csflow.lightning_model.CsflowLitModel
+  init_args:
+    cross_conv_hidden_channels: 1024
+    n_coupling_blocks: 4
+    clamp: 3
+    num_channels: 3
+    visualizer: false
+
+trainer:
+  # the original trainer_arguments pin gradient clipping at 1
+  gradient_clip_val: 1
+  num_sanity_val_steps: 0

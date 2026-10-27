@@ -324,6 +324,7 @@ def test_cflow_source_dependency_locations_and_headers():
         "anomaly_detection/models/fastflow/model.py",
         "anomaly_detection/models/cflow/utils.py",
         "anomaly_detection/models/uflow/model.py",
+        "anomaly_detection/models/csflow/model.py",
     }
     pure_modules = {module for _, module in helpers["classified_modules"]()["pure"]}
     for name in ("__init__.py", "model.py", "utils.py", "anomaly_map.py"):

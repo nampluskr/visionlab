@@ -58,6 +58,10 @@ class LocalCsflow(models.Csflow):
 
         csflow_torch_model.efficientnet_b5 = efficientnet_b5
         super().__init__(**kwargs)
+        # the extractor constructor dry-runs in train mode on uninitialized memory and corrupts BatchNorm running statistics; keep the train-mode dry-run so the random number order matches the original, then restore the local weights (Phase 15, user decision 2026-10-28).
+        self.model.feature_extractor.feature_extractor.backbone.load_state_dict(
+            torch.load(weights_file, map_location="cpu", weights_only=True), strict=True,
+        )
 
 
 class LocalDsr(models.Dsr):
