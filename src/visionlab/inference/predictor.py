@@ -36,6 +36,10 @@ class Predictor:
                   "dfm": DFMModel, "dfkde": DfkdeModel, "patchcore": PatchcoreModel,
                   "reverse_distillation": ReverseDistillationModel, "cfa": CfaModel, "fre": FREModel,
                   "supersimplenet": SupersimplenetModel, "draem": DraemModel}
+        if exported["model_name"] == "fastflow":
+            from visionlab.anomaly_detection.models.fastflow.model import FastflowModel
+
+            models["fastflow"] = FastflowModel
         model_args = dict(exported["model_args"])
         if exported["model_name"] == "dfkde":
             model_args["feature_scaling_method"] = FeatureScalingMethod(model_args["feature_scaling_method"])

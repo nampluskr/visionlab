@@ -1,0 +1,15 @@
+# src/visionlab/anomaly_detection/configs/models/fastflow.yaml: native FastFlow with a local backbone
+# Pass --data <name> before --model fastflow.
+model:
+  class_path: visionlab.anomaly_detection.models.fastflow.lightning_model.FastflowLitModel
+  init_args:
+    backbone: resnet18
+    pre_trained: true
+    flow_steps: 8
+    conv3x3_only: false
+    hidden_ratio: 1.0
+    visualizer: false
+
+trainer:
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0

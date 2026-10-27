@@ -127,6 +127,15 @@ visionlab/                                      # project root
 │   │   └── test_predictor.py                   # FR-14
 │   ├── 02_efficient_ad/
 │   │   └── test_efficient_ad.py                # FR-15
+│   ├── 10_supersimplenet/
+│   │   ├── test_supersimplenet.py              # pure model, Perlin synthesis, loss
+│   │   └── test_supersimplenet_lightning.py    # FR-6, FR-12, FR-14, D-19
+│   ├── 11_draem/
+│   │   ├── test_draem.py                       # pure model, Perlin generator, SSPCAB, loss
+│   │   └── test_draem_lightning.py             # FR-6, FR-12, FR-14, beta tuple
+│   ├── 12_fastflow/
+│   │   ├── test_fastflow.py                    # pure model, AllInOneBlock, D-26
+│   │   └── test_fastflow_lightning.py          # FR-6, FR-12, FR-14, D-19, D-26
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -137,7 +146,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -150,24 +159,47 @@ visionlab/                                      # project root
         │   ├── models/
         │   │   ├── components/                 # copied from anomalib models/components, only what is used (D-11, D-18)
         │   │   │   ├── feature_extractors/     # copied: TimmFeatureExtractor, feature shape helpers
+        │   │   │   ├── flow/
+        │   │   │   │   └── all_in_one_block.py # copied: AllInOneBlock, imports FrEIA InvertibleModule (D-26)
+        │   │   │   ├── layers/
+        │   │   │   │   └── sspcab.py           # copied: SSPCAB
         │   │   │   └── tiling/
         │   │   │       └── tiler.py            # Tiler, new (replaces anomalib.data.utils.tiler)
+        │   │   ├── draem/                      # copied from anomalib models/image/draem (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── lightning_model.py      # DraemLitModel, native LightningModule
+        │   │   │   ├── loss.py                 # DraemLoss (kornia, D-23)
+        │   │   │   └── model.py                # DraemModel (was torch_model.py)
         │   │   ├── efficient_ad/               # copied from anomalib models/image/efficient_ad (D-18)
         │   │   │   ├── __init__.py
         │   │   │   ├── lightning_model.py      # EfficientAdLitModel, native LightningModule
         │   │   │   └── model.py                # EfficientAdModel, EfficientAdModelSize (was torch_model.py)
-        │   │   └── stfpm/                      # copied from anomalib models/image/stfpm (D-18)
+        │   │   ├── fastflow/                   # copied from anomalib models/image/fastflow (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_map.py          # AnomalyMapGenerator
+        │   │   │   ├── lightning_model.py      # FastflowLitModel, native LightningModule
+        │   │   │   ├── loss.py                 # FastflowLoss
+        │   │   │   └── model.py                # FastflowModel, imports FrEIA SequenceINN (D-26, was torch_model.py)
+        │   │   ├── stfpm/                      # copied from anomalib models/image/stfpm (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_map.py          # AnomalyMapGenerator
+        │   │   │   ├── lightning_model.py      # StfpmLitModel, native LightningModule
+        │   │   │   ├── loss.py                 # STFPMLoss
+        │   │   │   └── model.py                # STFPMModel (was torch_model.py)
+        │   │   └── supersimplenet/             # copied from anomalib models/image/supersimplenet (D-18)
         │   │       ├── __init__.py
-        │   │       ├── anomaly_map.py          # AnomalyMapGenerator
-        │   │       ├── lightning_model.py      # StfpmLitModel, native LightningModule
-        │   │       ├── loss.py                 # STFPMLoss
-        │   │       └── model.py                # STFPMModel (was torch_model.py)
+        │   │       ├── anomaly_generator.py    # AnomalyGenerator
+        │   │       ├── lightning_model.py      # SupersimplenetLitModel, native LightningModule
+        │   │       ├── loss.py                 # SSNLoss
+        │   │       └── model.py                # SupersimplenetModel (was torch_model.py)
         │   ├── common/                         # new, replaces anomalib parts outside models (D-7, D-18)
         │   │   ├── batch.py                    # Batch, InferenceBatch (anomalib.data), Phase 0
         │   │   ├── evaluator.py                # Evaluator (anomalib.metrics)
         │   │   ├── learning_type.py            # LearningType (anomalib)
         │   │   ├── lightning_visualizer.py     # native file-saving Callback
         │   │   ├── metric.py                   # AUROC, F1
+        │   │   ├── multi_random_choice.py      # MultiRandomChoice (anomalib.data.transforms), Phase 11
+        │   │   ├── perlin.py                   # generate_perlin_noise (Phase 10), PerlinAnomalyGenerator (Phase 11)
         │   │   ├── post_processor.py           # PostProcessor (anomalib.post_processing)
         │   │   ├── pre_processor.py            # PreProcessor (anomalib.pre_processing)
         │   │   └── visualizer.py               # ImageVisualizer
@@ -281,3 +313,12 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다(D-23과 같다). scikit-learn은 PyTorch 위의 라이브러리가 아니므로 이 결정은 그 범위를 적합 시점의 예외로 넓혀 읽는다. 배포되는 추론 경로에는 남지 않는다. INTENT는 고치지 않는다.
 - **근거**: 원본 알고리즘 보존(D-18). 독립 구현하면 난수를 소비하는 순서가 달라져 coreset이 레퍼런스와 어긋날 수 있다. 같은 seed에서 native의 memory bank가 레퍼런스와 모든 행이 같았다(Phase 6, bottle 16,385행, capsule 17,169행). CFA의 `KMeans`는 기본값에서 쓰이지 않아 import 위치만 옮겼다.
 - **배제한 대안**: numpy나 torch로 `sample_without_replacement`와 `KMeans`를 독립 구현하는 방식(coreset이 레퍼런스와 어긋날 위험이 있다). 모듈 최상단에서 import하는 방식(추론 환경에도 scikit-learn이 필요해진다).
+
+## D-26. FrEIA를 flow 계열 순수 모델의 외부 의존으로 허용한다
+
+- **선택**: FastFlow의 `SequenceINN`과 `AllInOneBlock`이 상속하는 `InvertibleModule`은 원본처럼 FrEIA(0.2)에서 import한다. 독립 구현하지 않는다(Phase 12, 사용자 결정 2026-10-27). `AllInOneBlock`은 anomalib의 `all_in_one_block.py`를 D-18대로 복사하고 `InvertibleModule` 등 FrEIA 부품만 FrEIA에서 import한다. FrEIA의 `AllInOneBlock`을 직접 쓰지 않는다. 복사본이 anomalib 외에 쓰는 외부 의존(scipy 등)은 원본대로 둔다.
+- **적용 범위**: FrEIA에만 해당한다. flow 계열 Phase 12~15(FastFlow, CFLOW, UFlow, CSFlow)가 같은 결정을 따른다. 원본 코드에서 확인한 FrEIA 사용처는 FastFlow와 CFLOW의 `SequenceINN`, UFlow의 `GraphINN`·`InputNode`·`Node`·`OutputNode`·`Split`, CSFlow의 `GraphINN`·`InvertibleModule`이다(Phase 13~15는 해당 Phase 시작 때 다시 확인한다). 다른 라이브러리(open_clip 등)는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. FrEIA는 추론 경로에도 필요하다. flow 블록이 모델 구조 자체이고 평가 모드 `forward`가 호출하므로 지연 import로 학습에만 한정할 수 없다. 따라서 배포 환경에 FrEIA와 FrEIA가 요구하는 numpy, scipy가 설치되어 있어야 한다. FrEIA는 Lightning과 anomalib을 import하지 않으므로 NFR-1, NFR-2, FR-14, FR-19의 import 차단 판정은 그대로 유지된다. 각 Phase의 테스트가 순수 모델이 FrEIA는 필요로 하되 Lightning과 anomalib 없이 로딩됨을 격리 프로세스에서 확인한다.
+- **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다", "PyTorch만 사용할 수 있다"와 긴장 관계에 있다(D-23과 같다). FrEIA는 PyTorch 위에 만든 라이브러리이므로 이 결정은 그 범위를 PyTorch 생태계 패키지까지 넓혀 읽는다. numpy와 scipy는 FrEIA의 요구 사항으로 따라오는 간접 의존이다. INTENT는 고치지 않는다.
+- **근거**: 원본 알고리즘과 `state_dict` 구조의 보존(D-18). 독립 구현하면 `SequenceINN`·`GraphINN`의 구성과 Jacobian 누적을 새로 검증해야 하고 원본의 난수 소비 순서와 어긋날 위험이 있다. `AllInOneBlock`은 anomalib 복사본이 FrEIA 원본과 달라(hard permutation의 난수원이 `torch.randperm`이고 FrEIA는 `np.random.permutation`이다) FrEIA의 것을 직접 쓰면 레퍼런스와 초기 가중치가 어긋나므로 anomalib 복사본을 쓴다.
+- **배제한 대안**: 공통 flow 블록과 Jacobian 계산의 독립 구현(PLAN 12행의 처음 계획이며 검증 대상이 늘어난다). FrEIA의 `AllInOneBlock`을 직접 쓰는 방식(난수가 어긋난다). FrEIA를 지연 import하는 방식(flow 블록이 모델 구조 자체라 불가능하다).
+- **남은 한계**: 배포 환경 요건이 INTENT의 "PyTorch만"보다 넓어진다(FrEIA 0.2, numpy, scipy). anomalib `AllInOneBlock` 복사본의 `scipy.stats.special_ortho_group` 최상단 import는 원본대로 둔다(`permute_soft=True`일 때만 쓰인다).

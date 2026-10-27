@@ -87,7 +87,7 @@ Phase 1~18의 각 모델 Phase에 적용한다. 각 Phase는 모델 하나를 �
   - native Lightning 학습·평가의 category별 Image·Pixel AUROC가 그 Phase의 레퍼런스와 각각 0.01 이내다(FR-18). 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다(D-24).
   - 학습 가중치를 순수 PyTorch 모델로 불러와 추론한 category별 Image·Pixel AUROC가 그 Phase의 레퍼런스와 각각 0.01 이내다(FR-19, FR-20). 비교 정의는 위와 같다(D-24).
   - image metric만 내는 모델(DFKDE, GANomaly)은 Image AUROC만 기록·판정한다.
-  - 학습에 쓰던 외부 라이브러리(FrEIA, open_clip 등)가 추론 경로에 남지 않는다(NFR-2). 독립 구현 비용은 해당 Phase 범위에 포함한다.
+  - 학습에 쓰던 외부 라이브러리(open_clip 등)가 추론 경로에 남지 않는다(NFR-2). 독립 구현 비용은 해당 Phase 범위에 포함한다. 단 FrEIA는 flow 계열(Phase 12~15)의 모델 구조라 D-26에 따라 예외로 추론 경로에도 남는다.
   - 생성자가 pretrained를 읽는 모델은 FR-22, FR-23의 판정 방법이 통과한다(D-19).
   - metric은 torchmetrics로 계산하고(FR-24, D-20), 그 Phase의 테스트는 pytest로 작성해 `python.exe -m pytest`로 실행한다(NFR-6, D-21).
   - NFR-3·NFR-4의 판정 방법이 통과한다.
@@ -121,7 +121,7 @@ Phase 1~18의 각 모델 Phase에 적용한다. 각 Phase는 모델 하나를 �
 | 9 | FRE | 역전파 | 원본은 220 epoch을 고정하지만 10 epoch로 통일한다(D-22) |
 | 10 | SuperSimpleNet | 합성 특징 이상 | 공통 Perlin 생성 함수 도입 |
 | 11 | DRAEM | 합성 이미지 이상 | Perlin 재사용, DTD augmentation, resize 전용 전처리 |
-| 12 | FastFlow | flow | 공통 flow 블록(AllInOneBlock)과 Jacobian 계산 독립 구현 |
+| 12 | FastFlow | flow | FrEIA(`SequenceINN`, `InvertibleModule`)를 import해 쓰고 독립 구현하지 않는다(D-26). `AllInOneBlock`은 anomalib 복사본을 공통 flow 블록으로 둔다 |
 | 13 | CFLOW | 조건부 flow | flow 블록 재사용, 위치 encoding, 수동 최적화 |
 | 14 | UFlow | 다중 스케일 flow | flow 블록과 graph 연결 확장 |
 | 15 | CSFlow | cross-scale flow | 별도 coupling 구현, EfficientNet-B5 로컬 가중치 |
