@@ -309,7 +309,7 @@ assert not blocked & {name.split(".")[0] for name in sys.modules}
 
 
 def test_fastflow_freia_import_locations():
-    """Limit actual FrEIA imports to the pure model and copied common flow block."""
+    """Limit actual FrEIA imports to the pure flow models and copied common flow block."""
     locations = set()
     for directory, _, names in os.walk(SOURCE_ROOT):
         for name in names:
@@ -330,6 +330,7 @@ def test_fastflow_freia_import_locations():
     assert locations == {
         "anomaly_detection/models/fastflow/model.py",
         "anomaly_detection/models/components/flow/all_in_one_block.py",
+        "anomaly_detection/models/cflow/utils.py",
     }
 
 

@@ -366,3 +366,36 @@ def test_supersimplenet_config_merging_and_output_name(tmp_path, cli_assets, max
     assert cli.model.layers == ["layer2", "layer3"] and cli.model.perlin_threshold == 0.2
     assert not cli.model.supervised and cli.model.model.segdec.stop_grad and cli.model.visualizer is None
     assert cli.trainer.default_root_dir.endswith(os.path.join("supersimplenet", "mvtec_bottle", "v0"))
+
+
+@pytest.mark.parametrize("data,category", (("mvtec", "bottle"), ("visa", "candle")))
+@pytest.mark.parametrize("max_epochs", (None, 5))
+def test_cflow_config_merging_and_output_name(tmp_path, cli_assets, data, category, max_epochs):
+    """Apply CFLOW's one-epoch YAML budget while preserving explicit CLI overrides and model folders."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "cflow.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["class_path"].endswith("cflow.lightning_model.CflowLitModel")
+    assert config["model"]["init_args"] == {
+        "backbone": "wide_resnet50_2", "layers": ["layer2", "layer3", "layer4"], "pre_trained": True,
+        "fiber_batch_size": 64, "decoder": "freia-cflow", "condition_vector": 128,
+        "coupling_blocks": 8, "clamp_alpha": 1.9, "permute_soft": False, "lr": 0.0001, "visualizer": False,
+    }
+    assert config["trainer"] == {"max_epochs": 1, "num_sanity_val_steps": 0, "gradient_clip_val": 0}
+    arguments = ["--data", data, "--model", "cflow", "--model.init_args.backbone", "resnet18",
+                 "--model.init_args.layers", '["layer1", "layer2", "layer3"]',
+                 "--model.init_args.condition_vector", "16", "--model.init_args.coupling_blocks", "2",
+                 "--model.init_args.fiber_batch_size", "16",
+                 "--trainer.num_sanity_val_steps", "2", "--trainer.gradient_clip_val", "5",
+                 "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                 "--trainer.devices", "1", "--trainer.logger", "false"]
+    if max_epochs is not None:
+        arguments += ["--trainer.max_epochs", str(max_epochs)]
+    cli = LitCLI(args=arguments, run=False)
+    assert cli.trainer.max_epochs == (1 if max_epochs is None else max_epochs)
+    assert cli.trainer.num_sanity_val_steps == cli.trainer.gradient_clip_val == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.automatic_optimization is False and cli.model.visualizer is None
+    assert cli.model.teacher_weights_path == os.path.join(cli_assets, "resnet18.pth")
+    assert cli.trainer.default_root_dir.endswith(os.path.join("cflow", f"{data}_{category}", "v0"))

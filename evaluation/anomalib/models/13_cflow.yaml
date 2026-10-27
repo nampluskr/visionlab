@@ -1,4 +1,4 @@
-# evaluation/anomalib/models/13_cflow.yaml: cflow model
+# evaluation/anomalib/models/13_cflow.yaml: cflow model with a one-epoch training budget
 
 model:
   class_path: anomalib.models.Cflow
@@ -14,3 +14,7 @@ model:
     permute_soft: false
     lr: 0.0001
     visualizer: false
+
+# CFLOW pins no epoch count; one epoch is used by user decision (training time, Phase 13).
+trainer:
+  max_epochs: 1

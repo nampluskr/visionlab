@@ -136,6 +136,9 @@ visionlab/                                      # project root
 │   ├── 12_fastflow/
 │   │   ├── test_fastflow.py                    # pure model, AllInOneBlock, D-26
 │   │   └── test_fastflow_lightning.py          # FR-6, FR-12, FR-14, D-19, D-26
+│   ├── 13_cflow/
+│   │   ├── test_cflow.py                       # pure model, einops equality, D-26
+│   │   └── test_cflow_lightning.py             # FR-6, FR-12, FR-14, D-19, manual optimization
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -146,7 +149,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -157,6 +160,12 @@ visionlab/                                      # project root
         │   │       ├── dataset.py              # VisADataset, VisATransform
         │   │       └── lightning_data.py       # VisALitData
         │   ├── models/
+        │   │   ├── cflow/                      # copied from anomalib models/image/cflow (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_map.py          # AnomalyMapGenerator
+        │   │   │   ├── lightning_model.py      # CflowLitModel, native LightningModule (manual optimization)
+        │   │   │   ├── model.py                # CflowModel (was torch_model.py)
+        │   │   │   └── utils.py                # cflow_head, get_logp, positional_encoding_2d (imports FrEIA, D-26)
         │   │   ├── components/                 # copied from anomalib models/components, only what is used (D-11, D-18)
         │   │   │   ├── feature_extractors/     # copied: TimmFeatureExtractor, feature shape helpers
         │   │   │   ├── flow/
@@ -285,11 +294,11 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 
 ## D-22. 학습 에폭은 10 epoch로 고정하고, 1 epoch 적합 모델은 예외로 한다
 
-- **선택**: 여러 에폭이 필요한 모델은 공유 yaml의 `max_epochs=10`을 레퍼런스와 native에 똑같이 쓰고 모델 yaml로 덮어쓰지 않는다(Phase 2 EfficientAD, 사용자 결정 2026-10-25). 원본이 `trainer_arguments`로 `max_epochs=1`을 고정하는 적합형 모델은 그 값을 따르며, 레퍼런스 yaml과 native yaml 모두 `max_epochs: 1`이다(Phase 3 PaDiM 사용자 결정 2026-10-25, Phase 4 DFM 사용자 결정 2026-10-26). 원본이 `trainer_arguments`로 1이 아닌 에폭을 고정하는 모델(FRE의 220 epoch)은 레퍼런스 어댑터(`evaluation/anomalib/local_models.py`의 `LocalFre`)가 그 값을 공유 예산의 10으로 바꾸고, native의 `trainer_arguments`도 10으로 둔다(Phase 9, 사용자 결정 2026-10-26).
-- **적용 범위**: 모델이 10이 아닌 여러 에폭을 고정하는 경우는 레퍼런스와 native 모두 10으로 통일한다. 원본이 의도한 에폭에서의 성능은 확인하지 않는다.
-- **근거**: 원본이 고정한 값을 바꾸면 알고리즘을 바꾸는 것이다(D-18). 레퍼런스와 native가 같은 학습 예산이어야 FR-18 비교가 성립한다. FRE의 220 epoch는 알고리즘(구조, 손실)이 아니라 학습 예산이므로 사용자가 예외로 정했다. 220 epoch는 측정한 에폭당 속도로 bottle 약 35분, visa 약 100분이 1회당 들고 레퍼런스와 native를 합치면 약 4.5시간이 예상되었다. 10 epoch는 두 category 합계 약 7분이었다(Phase 9).
-- **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다). FRE에 원본의 220 epoch를 그대로 쓰는 방식(시간이 길다. Phase 9에서 처음 정한 뒤 사용자가 철회했다). 임의의 N epoch로 절충하는 방식(근거가 없다).
-- **남은 한계**: FRE는 원본이 고정한 220 epoch가 아니라 10 epoch로 학습한 결과를 비교하므로 원본이 의도한 수렴 상태의 성능은 확인하지 않았다(Phase 9).
+- **선택**: 여러 에폭이 필요한 모델은 공유 yaml의 `max_epochs=10`을 레퍼런스와 native에 똑같이 쓰고 모델 yaml로 덮어쓰지 않는다(Phase 2 EfficientAD, 사용자 결정 2026-10-25). 원본이 `trainer_arguments`로 `max_epochs=1`을 고정하는 적합형 모델은 그 값을 따르며, 레퍼런스 yaml과 native yaml 모두 `max_epochs: 1`이다(Phase 3 PaDiM 사용자 결정 2026-10-25, Phase 4 DFM 사용자 결정 2026-10-26). 원본이 `trainer_arguments`로 1이 아닌 에폭을 고정하는 모델(FRE의 220 epoch)은 레퍼런스 어댑터(`evaluation/anomalib/local_models.py`의 `LocalFre`)가 그 값을 공유 예산의 10으로 바꾸고, native의 `trainer_arguments`도 10으로 둔다(Phase 9, 사용자 결정 2026-10-26). 원본이 `max_epochs`를 고정하지 않아도 학습 시간이 지나치게 길어 사용자가 Phase 시작 전에 1 epoch로 줄인 모델(CFLOW)은 레퍼런스 yaml과 native yaml의 `trainer.max_epochs: 1`로 에폭을 정하고 1 epoch 결과의 AUROC만 비교한다(Phase 13, 사용자 결정 2026-10-27).
+- **적용 범위**: 모델이 10이 아닌 여러 에폭을 고정하는 경우는 레퍼런스와 native 모두 10으로 통일한다. 원본이 의도한 에폭에서의 성능은 확인하지 않는다. 사용자가 Phase 시작 전에 정한 모델에 한해 모델 yaml로 에폭을 정한다. 이는 "여러 에폭이 필요한 모델은 모델 yaml로 덮어쓰지 않는다"의 예외이며 일반 규칙이 아니다(`evaluation/anomalib/default.yaml`의 주석도 이 예외를 적는다).
+- **근거**: 원본이 고정한 값을 바꾸면 알고리즘을 바꾸는 것이다(D-18). 레퍼런스와 native가 같은 학습 예산이어야 FR-18 비교가 성립한다. FRE의 220 epoch는 알고리즘(구조, 손실)이 아니라 학습 예산이므로 사용자가 예외로 정했다. 220 epoch는 측정한 에폭당 속도로 bottle 약 35분, visa 약 100분이 1회당 들고 레퍼런스와 native를 합치면 약 4.5시간이 예상되었다. 10 epoch는 두 category 합계 약 7분이었다(Phase 9). CFLOW는 fiber batch(64)마다 optimizer step을 밟아 256 입력, batch 8에서 168 step이고 1 epoch가 bottle 약 4,500 step, candle 약 19,000 step이다. 실제 1 epoch 학습이 레퍼런스 bottle 2분 13초, candle 8분 21초였고, 10 epoch이면 같은 속도로 레퍼런스와 native를 합쳐 bottle 약 45분, candle 약 3시간이 들 것으로 환산된다(환산이며 측정하지 않았다).
+- **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다). FRE에 원본의 220 epoch를 그대로 쓰는 방식(시간이 길다. Phase 9에서 처음 정한 뒤 사용자가 철회했다). 임의의 N epoch로 절충하는 방식(근거가 없다). CFLOW에 공유 10 epoch를 그대로 쓰는 방식(학습 시간이 길다, Phase 13).
+- **남은 한계**: FRE는 원본이 고정한 220 epoch가 아니라 10 epoch로 학습한 결과를 비교하므로 원본이 의도한 수렴 상태의 성능은 확인하지 않았다(Phase 9). CFLOW는 원본이 의도한 에폭에서의 성능은 확인하지 않았고 1 epoch 학습의 AUROC만 비교했다(Phase 13).
 
 ## D-23. kornia를 순수 모델과 학습 손실의 외부 의존으로 허용한다
 

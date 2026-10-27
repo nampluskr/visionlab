@@ -40,6 +40,10 @@ class Predictor:
             from visionlab.anomaly_detection.models.fastflow.model import FastflowModel
 
             models["fastflow"] = FastflowModel
+        if exported["model_name"] == "cflow":
+            from visionlab.anomaly_detection.models.cflow.model import CflowModel
+
+            models["cflow"] = CflowModel
         model_args = dict(exported["model_args"])
         if exported["model_name"] == "dfkde":
             model_args["feature_scaling_method"] = FeatureScalingMethod(model_args["feature_scaling_method"])

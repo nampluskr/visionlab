@@ -2,6 +2,8 @@
 
 # Models requiring multiple training epochs use exactly 10 epochs.
 # Their model YAML files must not override this shared training budget.
+# Exceptions decided by the user before a Phase for training time (CFLOW: 1 epoch)
+# set the epoch count through trainer.max_epochs in the model YAML.
 # Models whose trainer_arguments pin max_epochs (dfkde, dfm, padim, patchcore, winclip: 1,
 # fre: 220) ignore this value in anomalib_run.py.
 seed_everything: 42

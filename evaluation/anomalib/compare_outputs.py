@@ -104,6 +104,8 @@ DRAEM_RTOL = 1e-5
 DRAEM_ATOL = 1e-6
 FASTFLOW_RTOL = 1e-5
 FASTFLOW_ATOL = 1e-6
+CFLOW_RTOL = 1e-5
+CFLOW_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -1228,11 +1230,112 @@ def compare_fastflow(checks, information, samples, reference_checkpoint):
             record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
 
 
+def compare_cflow_forwards(checks, reference, native, data, samples):
+    """Compare shared-state CFLOW evaluation on the same normalized real-image batch."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if not len(dataset):
+        raise ValueError(f"Empty {data} test dataset")
+    count = min(samples, len(dataset))
+    images = torch.stack([dataset[index][0] for index in range(count)])
+    record_check(checks, f"FR-5 {data} inputs", images.shape == (count, 3, 256, 256),
+                 {"root": config["root"], "category": config["category"], "shape": list(images.shape),
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:count]]})
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(images)
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+    for name in ("pred_score", "anomaly_map"):
+        compare_tensor(checks, f"FR-5 {data} eval {name}", getattr(expected, name), getattr(actual, name),
+                       rtol=CFLOW_RTOL, atol=CFLOW_ATOL)
+    record_check(checks, f"FR-5 {data} eval shapes",
+                 expected.pred_score.shape == actual.pred_score.shape == (count,) and
+                 expected.anomaly_map.shape == actual.anomaly_map.shape == (count, 256, 256),
+                 {"pred_score": list(actual.pred_score.shape), "anomaly_map": list(actual.anomaly_map.shape)})
+
+
+def compare_cflow(checks, information, samples, reference_checkpoint):
+    """Compare CFLOW signatures, local encoder weights, pure inference and component calculations."""
+    from anomalib.models import Cflow
+    from anomalib.models.image.cflow.torch_model import CflowModel as ReferenceCflowModel
+    from anomalib.models.image.cflow import utils as reference_utils
+    from visionlab.anomaly_detection.models.cflow.lightning_model import CflowLitModel
+    from visionlab.anomaly_detection.models.cflow.model import CflowModel
+    from visionlab.anomaly_detection.models.cflow import utils as native_utils
+
+    record_check(checks, "FR-6 constructor signature", signature_fields(Cflow) == signature_fields(CflowLitModel),
+                 {"reference": signature_fields(Cflow), "native": signature_fields(CflowLitModel)})
+    reference = Cflow(backbone="wide_resnet50_2", pre_trained=True,
+                      post_processor=False, evaluator=False, visualizer=False)
+    native = CflowLitModel(backbone="wide_resnet50_2", pre_trained=True,
+                          post_processor=False, evaluator=False, visualizer=False)
+    expected = reference.model.encoder.feature_extractor.state_dict()
+    actual = native.model.encoder.feature_extractor.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    record_check(checks, "FR-23 local backbone", expected.keys() == actual.keys() and not mismatches,
+                 {"missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+                  "mismatches": mismatches, "weights": native.teacher_weights_path,
+                  "sha256": file_sha256(native.teacher_weights_path)})
+    if reference_checkpoint:
+        checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
+        state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                 if name.startswith("model.")}
+        if not state:
+            raise ValueError("Reference checkpoint has no model.* state")
+        del checkpoint
+    else:
+        state = reference.model.state_dict()
+    del reference, native, expected, actual
+    layers = ["layer2", "layer3", "layer4"]
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        pure_reference = ReferenceCflowModel(backbone="wide_resnet50_2", layers=layers, pre_trained=False)
+        torch.random.default_generator.manual_seed(42)
+        pure_native = CflowModel(backbone="wide_resnet50_2", layers=layers, pre_trained=False)
+    expected, actual = pure_reference.state_dict(), pure_native.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    entry = {"name": "seeded initial CFLOW state", "informational_only": True, "seed": 42,
+             "equal": expected.keys() == actual.keys() and not mismatches,
+             "missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+             "mismatches": mismatches}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    del expected, actual
+    pure_reference.load_state_dict(state, strict=True)
+    pure_native.load_state_dict(state, strict=True)
+    record_check(checks, "FR-5 shared model strict restore", True,
+                 {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "reference initial state"})
+    del state
+    generator = torch.Generator().manual_seed(43)
+    with torch.no_grad():
+        for index, channels in enumerate(pure_native.pool_dims):
+            values = torch.randn(13, channels, generator=generator)
+            condition = torch.randn(13, 128, generator=generator)
+            expected_z, expected_logdet = pure_reference.decoders[index](values, [condition])
+            actual_z, actual_logdet = pure_native.decoders[index](values, [condition])
+            for name, left, right in (("z", expected_z, actual_z), ("logdet", expected_logdet, actual_logdet),
+                                      ("get_logp", reference_utils.get_logp(channels, expected_z, expected_logdet),
+                                       native_utils.get_logp(channels, actual_z, actual_logdet))):
+                compare_tensor(checks, f"component decoder {index} {name}", left, right,
+                               rtol=CFLOW_RTOL, atol=CFLOW_ATOL)
+        compare_tensor(checks, "component positional_encoding_2d", reference_utils.positional_encoding_2d(128, 7, 9),
+                       native_utils.positional_encoding_2d(128, 7, 9), rtol=CFLOW_RTOL, atol=CFLOW_ATOL)
+    for data in ("mvtec", "visa"):
+        try:
+            compare_cflow_forwards(checks, pure_reference, pure_native, data, samples)
+        except Exception as error:
+            record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -1261,8 +1364,15 @@ def main():
         rtol, atol = DRAEM_RTOL, DRAEM_ATOL
     elif args.model == "fastflow":
         rtol, atol = FASTFLOW_RTOL, FASTFLOW_ATOL
+    elif args.model == "cflow":
+        rtol, atol = CFLOW_RTOL, CFLOW_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "fastflow":
+    if args.model == "cflow":
+        try:
+            compare_cflow(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "FR-23 / FR-5 model construction", False, f"{type(error).__name__}: {error}")
+    elif args.model == "fastflow":
         try:
             compare_fastflow(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -1325,10 +1435,12 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow"):
         report["information"] = information
     if args.model == "draem":
         report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}
+    if args.model == "cflow":
+        report["limitations"] = ["Manual training steps are not compared; assess one-epoch AUROC and train_loss_epoch separately."]
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as stream:

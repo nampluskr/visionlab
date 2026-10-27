@@ -1,0 +1,22 @@
+# src/visionlab/anomaly_detection/configs/models/cflow.yaml: native CFLOW with a one-epoch training budget
+# Pass --data <name> before --model cflow.
+model:
+  class_path: visionlab.anomaly_detection.models.cflow.lightning_model.CflowLitModel
+  init_args:
+    backbone: wide_resnet50_2
+    layers: [layer2, layer3, layer4]
+    pre_trained: true
+    fiber_batch_size: 64
+    decoder: freia-cflow
+    condition_vector: 128
+    coupling_blocks: 8
+    clamp_alpha: 1.9
+    permute_soft: false
+    lr: 0.0001
+    visualizer: false
+
+# CFLOW pins no epoch count; one epoch is used by user decision (training time, Phase 13), matching the reference YAML.
+trainer:
+  max_epochs: 1
+  num_sanity_val_steps: 0
+  gradient_clip_val: 0
