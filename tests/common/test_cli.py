@@ -13,6 +13,47 @@ from visionlab.utils import io as io_utils
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.mark.parametrize("data,category", (("mvtec", "bottle"), ("visa", "candle")))
+@pytest.mark.parametrize("max_epochs", (None, 5))
+def test_ganomaly_config_merging_and_output_name(tmp_path, monkeypatch, data, category, max_epochs):
+    """Merge GANomaly's data batches and manual trainer settings while retaining shared or explicit epoch budgets."""
+    import yaml
+
+    monkeypatch.setattr(io_utils, "PATHS_FILE", os.path.join(tmp_path, "absent.toml"))
+    with open(os.path.join(CONFIG_DIR, "models", "ganomaly.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["class_path"] == "visionlab.anomaly_detection.models.ganomaly.lightning_model.GanomalyLitModel"
+    assert config["model"]["init_args"] == {
+        "batch_size": 32, "n_features": 64, "latent_vec_size": 100, "extra_layers": 0,
+        "add_final_conv_layer": True, "wadv": 1, "wcon": 50, "wenc": 1, "lr": 0.0002,
+        "beta1": 0.5, "beta2": 0.999, "visualizer": False,
+    }
+    assert config["data"]["init_args"] == {"train_batch_size": 32, "eval_batch_size": 32}
+    assert config["trainer"] == {"gradient_clip_val": 0, "num_sanity_val_steps": 0}
+    expanded = expand_args(["--data", data, "--model", "ganomaly"], run=False)
+    configs = [expanded[index + 1] for index, value in enumerate(expanded) if value == "--config"]
+    assert configs == [os.path.join(CONFIG_DIR, "default.yaml"), os.path.join(CONFIG_DIR, "trainer.yaml"),
+                       os.path.join(CONFIG_DIR, "data", f"{data}.yaml"), os.path.join(CONFIG_DIR, "models", "ganomaly.yaml")]
+    arguments = ["--data", data, "--model", "ganomaly", "--model.init_args.n_features", "4",
+                 "--model.init_args.latent_vec_size", "16", "--trainer.num_sanity_val_steps", "2",
+                 "--trainer.gradient_clip_val", "5", "--trainer.default_root_dir", os.path.join(tmp_path, "runs"),
+                 "--trainer.accelerator", "cpu", "--trainer.devices", "1", "--trainer.logger", "false"]
+    if max_epochs is not None:
+        arguments += ["--trainer.max_epochs", str(max_epochs)]
+    cli = LitCLI(args=arguments, run=False)
+    assert cli.trainer.max_epochs == (10 if max_epochs is None else max_epochs)
+    assert cli.trainer.gradient_clip_val == cli.config.trainer.gradient_clip_val == 0
+    assert cli.trainer.num_sanity_val_steps == cli.config.trainer.num_sanity_val_steps == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 32
+    assert cli.model.real_label.shape == cli.model.fake_label.shape == (32,)
+    assert cli.model.model.generator.encoder1.final_conv_layer.in_channels == \
+        cli.model.model.generator.decoder.latent_input[0].out_channels == cli.model.n_features * 2**5 == 128
+    assert cli.model.n_features == 4 and cli.model.latent_vec_size == 16
+    assert cli.model.automatic_optimization is False and cli.model.visualizer is None
+    assert cli.model.teacher_weights_path is None
+    assert cli.trainer.default_root_dir.endswith(os.path.join("ganomaly", f"{data}_{category}", "v0"))
+
+
 @pytest.fixture(scope="module")
 def csflow_cli_weights(tmp_path_factory):
     """Create one full torchvision teacher file for the small CSFlow CLI cases."""

@@ -110,6 +110,8 @@ UFLOW_RTOL = 1e-5
 UFLOW_ATOL = 1e-6
 CSFLOW_RTOL = 1e-5
 CSFLOW_ATOL = 1e-6
+GANOMALY_RTOL = 1e-5
+GANOMALY_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -1620,11 +1622,155 @@ def compare_csflow(checks, information, samples, reference_checkpoint):
     compare_csflow_components(checks)
 
 
+def compare_ganomaly_forwards(checks, reference, native, state, data, samples):
+    """Restore identical CPU state before evaluation and training forwards on one real image batch."""
+    from anomalib.models.image.ganomaly.loss import DiscriminatorLoss as ReferenceDiscriminatorLoss
+    from anomalib.models.image.ganomaly.loss import GeneratorLoss as ReferenceGeneratorLoss
+    from visionlab.anomaly_detection.models.ganomaly.loss import DiscriminatorLoss, GeneratorLoss
+
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if len(dataset) < samples:
+        raise ValueError(f"Expected at least {samples} {data} test samples, found {len(dataset)}")
+    images = torch.stack([dataset[index][0] for index in range(samples)])
+    record_check(checks, f"FR-5 {data} inputs", images.shape == (samples, 3, 256, 256),
+                 {"root": config["root"], "category": config["category"], "shape": list(images.shape),
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:samples]]})
+    images = PreProcessor(mean=IMAGENET_MEAN, std=IMAGENET_STD)(images)
+    reference.load_state_dict(state, strict=True)
+    native.load_state_dict(state, strict=True)
+    reference.eval()
+    native.eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+        compare_tensor(checks, f"FR-5 {data} eval pred_score", expected.pred_score, actual.pred_score,
+                       rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+        record_check(checks, f"FR-5 {data} image-only eval shape",
+                     expected.pred_score.shape == actual.pred_score.shape == (samples,) and
+                     expected.anomaly_map is actual.anomaly_map is None,
+                     {"pred_score": list(actual.pred_score.shape), "anomaly_map": None})
+        reference.load_state_dict(state, strict=True)
+        reference.train()
+        expected_train = reference(images)
+        padded, fake, latent_i, latent_o = expected_train
+        pred_real, _ = reference.discriminator(padded)
+        pred_fake, _ = reference.discriminator(fake)
+        expected_g = ReferenceGeneratorLoss()(latent_i, latent_o, padded, fake, pred_real, pred_fake)
+        expected_d = ReferenceDiscriminatorLoss()(pred_real, pred_fake)
+        native.load_state_dict(state, strict=True)
+        native.train()
+        actual_train = native(images)
+        padded, fake, latent_i, latent_o = actual_train
+        pred_real, _ = native.discriminator(padded)
+        pred_fake, _ = native.discriminator(fake)
+        actual_g = GeneratorLoss()(latent_i, latent_o, padded, fake, pred_real, pred_fake)
+        actual_d = DiscriminatorLoss()(pred_real, pred_fake)
+        record_check(checks, f"FR-5 {data} train tuple",
+                     isinstance(expected_train, tuple) and isinstance(actual_train, tuple) and
+                     len(expected_train) == len(actual_train) == 4,
+                     {"reference": len(expected_train), "native": len(actual_train)})
+        for name, expected, actual in zip(("padded", "fake", "latent_i", "latent_o"),
+                                           expected_train, actual_train, strict=True):
+            compare_tensor(checks, f"FR-5 {data} train {name}", expected, actual,
+                           rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+        compare_tensor(checks, f"FR-5 {data} train generator loss", expected_g, actual_g,
+                       rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+        compare_tensor(checks, f"FR-5 {data} train discriminator loss", expected_d, actual_d,
+                       rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+
+
+def compare_ganomaly_components(checks):
+    """Compare both weighted losses and the copied padding function independently of the full networks."""
+    from anomalib.data.utils.image import pad_nextpow2 as reference_pad
+    from anomalib.models.image.ganomaly.loss import DiscriminatorLoss as ReferenceDiscriminatorLoss
+    from anomalib.models.image.ganomaly.loss import GeneratorLoss as ReferenceGeneratorLoss
+    from visionlab.anomaly_detection.models.ganomaly.loss import DiscriminatorLoss, GeneratorLoss
+    from visionlab.anomaly_detection.models.ganomaly.model import pad_nextpow2
+
+    generator = torch.Generator().manual_seed(42)
+    with torch.no_grad():
+        latent_i, latent_o = (torch.randn(2, 16, 1, 1, generator=generator) for _ in range(2))
+        images, fake = (torch.randn(2, 3, 64, 64, generator=generator) for _ in range(2))
+        pred_real, pred_fake = (torch.rand(2, generator=generator) for _ in range(2))
+        for wadv, wcon, wenc in ((1, 50, 1), (2, 3, 4)):
+            args = (latent_i, latent_o, images, fake, pred_real, pred_fake)
+            compare_tensor(checks, f"FR-5 GeneratorLoss weights {wadv}/{wcon}/{wenc}",
+                           ReferenceGeneratorLoss(wadv, wcon, wenc)(*args), GeneratorLoss(wadv, wcon, wenc)(*args),
+                           rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+        compare_tensor(checks, "FR-5 DiscriminatorLoss", ReferenceDiscriminatorLoss()(pred_real, pred_fake),
+                       DiscriminatorLoss()(pred_real, pred_fake), rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+        for height, width in ((256, 256), (127, 128), (100, 60)):
+            images = torch.randn(2, 3, height, width, generator=generator)
+            compare_tensor(checks, f"FR-5 pad_nextpow2 {height}x{width}", reference_pad(images), pad_nextpow2(images),
+                           rtol=GANOMALY_RTOL, atol=GANOMALY_ATOL)
+
+
+def compare_ganomaly(checks, information, samples, reference_checkpoint):
+    """Compare signatures, seeded initialization and strict shared state using two CPU models and mmap checkpoints."""
+    import gc
+
+    from anomalib.models import Ganomaly
+    from anomalib.models.image.ganomaly.torch_model import GanomalyModel as ReferenceGanomalyModel
+    from visionlab.anomaly_detection.models.ganomaly.lightning_model import GanomalyLitModel
+    from visionlab.anomaly_detection.models.ganomaly.model import GanomalyModel
+
+    record_check(checks, "FR-6 constructor signature", signature_fields(Ganomaly) == signature_fields(GanomalyLitModel),
+                 {"reference": signature_fields(Ganomaly), "native": signature_fields(GanomalyLitModel)})
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        reference = ReferenceGanomalyModel(input_size=(256, 256), num_input_channels=3, n_features=64,
+                                            latent_vec_size=100, extra_layers=0, add_final_conv_layer=True).cpu()
+        torch.random.default_generator.manual_seed(42)
+        native = GanomalyModel(input_size=(256, 256), num_input_channels=3, n_features=64,
+                               latent_vec_size=100, extra_layers=0, add_final_conv_layer=True).cpu()
+    expected, actual = reference.state_dict(), native.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    entry = {"name": "seeded initial GANomaly state", "informational_only": True, "seed": 42,
+             "equal": expected.keys() == actual.keys() and not mismatches,
+             "missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+             "mismatches": mismatches}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    del expected, actual
+    state = None
+    try:
+        if reference_checkpoint:
+            checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False, mmap=True)
+            state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                     if name.startswith("model.")}
+            if not state:
+                raise ValueError("Reference checkpoint has no model.* state")
+            del checkpoint
+        else:
+            # Only BatchNorm buffers change during forward; keep the synthetic source independent without cloning weights.
+            buffers = dict(reference.named_buffers())
+            state = {name: value.clone() if name in buffers else value.detach()
+                     for name, value in reference.state_dict().items()}
+            del buffers
+        reference.load_state_dict(state, strict=True)
+        native.load_state_dict(state, strict=True)
+        record_check(checks, "FR-5 shared model strict restore", True,
+                     {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else
+                      "synthetic reference initial state", "device": "cpu"})
+        for data in ("mvtec", "visa"):
+            try:
+                compare_ganomaly_forwards(checks, reference, native, state, data, samples)
+            except Exception as error:
+                record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+    finally:
+        del state, reference, native
+        gc.collect()
+    compare_ganomaly_components(checks)
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -1659,8 +1805,16 @@ def main():
         rtol, atol = UFLOW_RTOL, UFLOW_ATOL
     elif args.model == "csflow":
         rtol, atol = CSFLOW_RTOL, CSFLOW_ATOL
+    elif args.model == "ganomaly":
+        rtol, atol = GANOMALY_RTOL, GANOMALY_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "csflow":
+    if args.model == "ganomaly":
+        try:
+            compare_ganomaly(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "GANomaly construction / strict restore / FR-5", False,
+                         f"{type(error).__name__}: {error}")
+    elif args.model == "csflow":
         try:
             compare_csflow(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -1738,12 +1892,17 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly"):
         report["information"] = information
     if args.model == "draem":
         report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}
     if args.model == "cflow":
         report["limitations"] = ["Manual training steps are not compared; assess one-epoch AUROC and train_loss_epoch separately."]
+    if args.model == "ganomaly":
+        report["not_applicable"] = {"FR-23": "GANomaly has no pretrained weights; strict shared model state is checked instead"}
+        report["limitations"] = [
+            "Manual Lightning training steps are not compared; assess ten-epoch AUROC, generator_loss_epoch and discriminator_loss_epoch separately.",
+        ]
     path = os.path.join(PROJECT_ROOT, "outputs", "compare", f"{args.model}_outputs.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as stream:

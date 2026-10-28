@@ -1,0 +1,26 @@
+# src/visionlab/anomaly_detection/configs/models/ganomaly.yaml: native GANomaly manual optimization and image-only evaluation
+model:
+  class_path: visionlab.anomaly_detection.models.ganomaly.lightning_model.GanomalyLitModel
+  init_args:
+    batch_size: 32
+    n_features: 64
+    latent_vec_size: 100
+    extra_layers: 0
+    add_final_conv_layer: true
+    wadv: 1
+    wcon: 50
+    wenc: 1
+    lr: 0.0002
+    beta1: 0.5
+    beta2: 0.999
+    visualizer: false
+
+# Pass --data <name> before --model ganomaly to preserve these overrides.
+data:
+  init_args:
+    train_batch_size: 32
+    eval_batch_size: 32
+
+trainer:
+  gradient_clip_val: 0
+  num_sanity_val_steps: 0

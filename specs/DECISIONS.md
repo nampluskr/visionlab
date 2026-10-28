@@ -145,6 +145,9 @@ visionlab/                                      # project root
 │   ├── 15_csflow/
 │   │   ├── test_csflow.py                      # pure model, GraphINN graph, original behavior, D-26
 │   │   └── test_csflow_lightning.py            # FR-6, FR-12, FR-14, D-19, D-26, gradient clipping
+│   ├── 16_ganomaly/
+│   │   ├── test_ganomaly.py                    # pure model, original quirks, pad_nextpow2
+│   │   └── test_ganomaly_lightning.py          # FR-6, FR-12, FR-14, two-optimizer manual optimization
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -155,7 +158,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml, ganomaly.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -201,6 +204,11 @@ visionlab/                                      # project root
         │   │   │   ├── lightning_model.py      # FastflowLitModel, native LightningModule
         │   │   │   ├── loss.py                 # FastflowLoss
         │   │   │   └── model.py                # FastflowModel, imports FrEIA SequenceINN (D-26, was torch_model.py)
+        │   │   ├── ganomaly/                   # copied from anomalib models/image/ganomaly (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── lightning_model.py      # GanomalyLitModel, native LightningModule (manual optimization)
+        │   │   │   ├── loss.py                 # GeneratorLoss, DiscriminatorLoss
+        │   │   │   └── model.py                # GanomalyModel, pad_nextpow2 copied from anomalib.data.utils.image (was torch_model.py)
         │   │   ├── stfpm/                      # copied from anomalib models/image/stfpm (D-18)
         │   │   │   ├── __init__.py
         │   │   │   ├── anomaly_map.py          # AnomalyMapGenerator

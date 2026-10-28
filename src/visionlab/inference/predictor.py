@@ -15,6 +15,7 @@ from visionlab.anomaly_detection.models.cfa.model import CfaModel
 from visionlab.anomaly_detection.models.fre.model import FREModel
 from visionlab.anomaly_detection.models.supersimplenet.model import SupersimplenetModel
 from visionlab.anomaly_detection.models.draem.model import DraemModel
+from visionlab.anomaly_detection.models.ganomaly.model import GanomalyModel
 from visionlab.anomaly_detection.models.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
 from visionlab.anomaly_detection.models.components.classification import FeatureScalingMethod
 from visionlab.utils.io import load_export
@@ -35,7 +36,7 @@ class Predictor:
         models = {"stfpm": STFPMModel, "efficient_ad": EfficientAdModel, "padim": PadimModel,
                   "dfm": DFMModel, "dfkde": DfkdeModel, "patchcore": PatchcoreModel,
                   "reverse_distillation": ReverseDistillationModel, "cfa": CfaModel, "fre": FREModel,
-                  "supersimplenet": SupersimplenetModel, "draem": DraemModel}
+                  "supersimplenet": SupersimplenetModel, "draem": DraemModel, "ganomaly": GanomalyModel}
         if exported["model_name"] == "fastflow":
             from visionlab.anomaly_detection.models.fastflow.model import FastflowModel
 
@@ -45,6 +46,8 @@ class Predictor:
 
             models["cflow"] = CflowModel
         model_args = dict(exported["model_args"])
+        if exported["model_name"] == "ganomaly":
+            model_args["input_size"] = tuple(model_args["input_size"])
         if exported["model_name"] == "dfkde":
             model_args["feature_scaling_method"] = FeatureScalingMethod(model_args["feature_scaling_method"])
         elif exported["model_name"] == "reverse_distillation":

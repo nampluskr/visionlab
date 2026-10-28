@@ -34,6 +34,7 @@ LIGHTNING_FILES = {
     "anomaly_detection/models/cflow/lightning_model.py",
     "anomaly_detection/models/uflow/lightning_model.py",
     "anomaly_detection/models/csflow/lightning_model.py",
+    "anomaly_detection/models/ganomaly/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -104,6 +105,8 @@ def classified_modules():
                  name in ("model.py", "feature_extraction.py", "anomaly_map.py", "loss.py")) or \
                 (relative.startswith("anomaly_detection/models/csflow/") and
                  name in ("model.py", "anomaly_map.py", "loss.py")) or \
+                (relative.startswith("anomaly_detection/models/ganomaly/") and
+                 name in ("model.py", "loss.py")) or \
                 name == "__init__.py":
             group = "pure"
         else:
