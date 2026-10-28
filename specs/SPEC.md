@@ -41,6 +41,7 @@
 | NFR-4 | 실행마다 최종 설정·분할 목록·가중치 해시·seed·checkpoint 식별 정보를 저장한다 | 실행 산출물에 해당 파일 존재 |
 | NFR-5 | 이식한 파일은 원본 저작권·SPDX 표기를 유지한다 | 이식 파일 헤더 grep |
 | NFR-6 | `tests/`의 테스트는 pytest로 작성하고 실행한다. `unittest`를 쓰지 않는다(D-21) | `tests/`의 `unittest` import 0건, `python.exe -m pytest tests\...` 실행 성공. import 차단 테스트는 subprocess로 확인 |
+| NFR-7 | 추론 경로(각 `model.py`, `models/components/`, 순수 `common/` 파일, `inference/`)는 torch와 부록 A의 허용 목록에 있는 외부 패키지만 import한다. 지연 import로 허용한 곳은 부록 A에 적은 파일과 함수뿐이다 | `tests/common/test_dependency.py`가 허용 목록 밖의 import를 차단한다. 현재 이 테스트는 anomalib, open_clip, ftfy, scikit-learn, regex, lightning만 검사하며, 허용 목록 전체를 검사하도록 넓히는 일은 부록 A 확정 뒤 별도로 한다 |
 
 ## 3. 제약사항
 
@@ -58,3 +59,17 @@
 - **X-6**: 기존 checkpoint 키·옛 import와의 자동 호환.
 - **X-7**: TensorBoard·W&B 로거.
 - **X-8**: 분산 실행 검증.
+
+## 부록 A. 추론 경로 외부 패키지 허용 목록
+
+NFR-7이 가리키는 허용 목록이다. 각 항목의 근거는 `DECISIONS.md`의 해당 결정이며, 사용자가 허용을 결정한 패키지만 올린다(INTENT 2026-10-28 승인). 다음은 허용 목록이다.
+
+| 패키지 | 허용 근거 | 허용 위치 | 추론 경로 |
+|---|---|---|---|
+| torchmetrics | D-20 | `common/metric.py`, `common/post_processor.py` | 남음 |
+| kornia | D-23 | `models/components/filters/blur.py`(추론), `models/draem/loss.py`, `models/dsr/loss.py`(학습 전용) | `blur.py`만 남음 |
+| scikit-learn | D-25 | `models/components/dimensionality_reduction/random_projection.py`, `models/cfa/model.py`의 `initialize_centroid`(함수 안 지연 import) | 남지 않음 |
+| FrEIA(와 numpy, scipy) | D-26 | FastFlow, CFLOW, UFlow, CSFlow 모델 파일과 `models/components/flow/all_in_one_block.py` | 남음 |
+| regex | D-28 | `models/winclip/tokenizer.py`의 `SimpleTokenizer.__init__`(지연 import) | 남지 않음 |
+
+timm, torchvision, numpy(FrEIA의 요구 사항이 아닌 단독 사용), tqdm, PIL, mpmath는 코드에서 추론 경로에 import되지만 허용 결정이 없어 이 목록에 올리지 않았다. 허용 여부는 사용자 결정을 기다린다(`docs/dependency-exceptions.md` 2.1절).
