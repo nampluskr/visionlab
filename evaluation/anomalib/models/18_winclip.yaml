@@ -9,6 +9,28 @@ model:
     scales: [2, 3]
     few_shot_source: null
     visualizer: false
+    # anomalib's default pre-processor resizes the 900x900 mvtec image straight to 240x240.
+    # This phase resizes to 256x256 first (visionlab Dataset input size, D-27), then to 240x240 bicubic.
+    pre_processor:
+      class_path: anomalib.pre_processing.PreProcessor
+      init_args:
+        transform:
+          class_path: torchvision.transforms.v2.Compose
+          init_args:
+            transforms:
+              - class_path: torchvision.transforms.v2.Resize
+                init_args:
+                  size: [256, 256]
+                  antialias: true
+              - class_path: torchvision.transforms.v2.Resize
+                init_args:
+                  size: [240, 240]
+                  interpolation: BICUBIC
+                  antialias: true
+              - class_path: torchvision.transforms.v2.Normalize
+                init_args:
+                  mean: [0.48145466, 0.4578275, 0.40821073]
+                  std: [0.26862954, 0.26130258, 0.27577711]
 
 # anomalib pins max_epochs=1 for this model; the pinned value overrides the trainer value.
 trainer:

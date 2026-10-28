@@ -10,6 +10,7 @@ from lightning.pytorch import LightningDataModule, LightningModule
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.cli import LightningCLI
 
+from visionlab.anomaly_detection.common.learning_type import LearningType
 from visionlab.utils.io import create_versioned_dir, write_run_info
 
 CONFIG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "configs"))
@@ -46,7 +47,8 @@ def expand_args(args, run=True):
 class LitCLI(LightningCLI):
     """Run native model and data subclasses with final configuration and split records."""
 
-    def __init__(self, args=None, run=True):
+    def __init__(self, args=None, run=True, train_and_test=False):
+        self.train_and_test = train_and_test
         super().__init__(
             model_class=LightningModule,
             datamodule_class=LightningDataModule,
@@ -109,7 +111,12 @@ class LitCLI(LightningCLI):
         return super().instantiate_trainer()
 
     def _run_subcommand(self, subcommand):
-        super()._run_subcommand(subcommand)
+        if (self.train_and_test and subcommand == "fit" and
+                self.model.learning_type in (LearningType.ZERO_SHOT, LearningType.FEW_SHOT)):
+            self.trainer.validate(model=self.model, datamodule=self.datamodule,
+                                  ckpt_path=self.config[subcommand].get("ckpt_path"))
+        else:
+            super()._run_subcommand(subcommand)
         self.record_run()
 
     def record_run(self):

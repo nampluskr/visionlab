@@ -13,6 +13,136 @@ from visionlab.utils import io as io_utils
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture
+def winclip_cli_assets(tmp_path, monkeypatch):
+    """Provide only a width-64 two-layer CLIP and a temporary teacher map for new WinCLIP CLI tests."""
+    import torch
+    from visionlab.anomaly_detection.models.winclip import model as winclip_module
+
+    helpers = runpy.run_path(os.path.join(PROJECT_ROOT, "tests", "18_winclip", "test_winclip.py"))
+    factory = helpers["make_small_clip"]
+    weights = os.path.join(tmp_path, "clip.bin")
+    torch.save(factory().state_dict(), weights)
+    mapping = os.path.join(tmp_path, "paths.toml")
+    with open(mapping, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write('[teachers]\nwinclip_clip = "' + weights.replace("\\", "/") + '"\n')
+    monkeypatch.setattr(io_utils, "PATHS_FILE", mapping)
+    monkeypatch.setattr(winclip_module, "CLIP", factory)
+    return weights
+
+
+@pytest.mark.parametrize("data,category", (("mvtec", "bottle"), ("visa", "candle")))
+def test_winclip_config_merging_and_output_name(tmp_path, winclip_cli_assets, data, category):
+    """Merge data before zero-shot model config without changing shared batch sizes or run naming."""
+    import yaml
+
+    with open(os.path.join(CONFIG_DIR, "models", "winclip.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["class_path"] == "visionlab.anomaly_detection.models.winclip.lightning_model.WinClipLitModel"
+    assert config["model"]["init_args"] == {
+        "class_name": None, "k_shot": 0, "scales": [2, 3], "few_shot_source": None, "visualizer": False,
+    }
+    assert config["trainer"] == {} and "data" not in config
+    expanded = expand_args(["--data", data, "--model", "winclip"], run=False)
+    configs = [expanded[index + 1] for index, value in enumerate(expanded) if value == "--config"]
+    assert configs == [os.path.join(CONFIG_DIR, "default.yaml"), os.path.join(CONFIG_DIR, "trainer.yaml"),
+                       os.path.join(CONFIG_DIR, "data", f"{data}.yaml"),
+                       os.path.join(CONFIG_DIR, "models", "winclip.yaml")]
+    cli = LitCLI(args=["--data", data, "--model", "winclip", "--trainer.default_root_dir", os.path.join(tmp_path, "runs"),
+                       "--trainer.accelerator", "cpu", "--trainer.devices", "1", "--trainer.logger", "false"], run=False)
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.teacher_weights_path == winclip_cli_assets
+    assert cli.model.visualizer is None and not cli.model.is_setup
+    assert cli.model.learning_type.value == "zero_shot" and cli.model.trainer_arguments == {}
+    assert cli.trainer.default_root_dir.endswith(os.path.join("winclip", f"{data}_{category}", "v0"))
+
+
+def test_winclip_train_entry_validates_then_tests(tmp_path, monkeypatch, winclip_cli_assets):
+    """Run the real train entry on tiny CPU data and verify validate, export and test without fit or checkpoints."""
+    from PIL import Image
+
+    root = os.path.join(tmp_path, "data")
+    for group in ("train/good", "test/good", "test/defect", "ground_truth/defect"):
+        os.makedirs(os.path.join(root, "bottle", group))
+    for index in range(2):
+        for group, value in (("train/good", 40), ("test/good", 80), ("test/defect", 180)):
+            Image.new("RGB", (24, 24), color=(value + index, 100, 120)).save(
+                os.path.join(root, "bottle", group, f"{index}.png"),
+            )
+        Image.new("L", (24, 24), color=255).save(
+            os.path.join(root, "bottle", "ground_truth", "defect", f"{index}_mask.png"),
+        )
+    events = []
+    run_subcommand = LitCLI._run_subcommand
+
+    def observe_dispatch(cli, subcommand):
+        validate, test = cli.trainer.validate, cli.trainer.test
+
+        def capture_validate(*args, **kwargs):
+            events.append("validate")
+            return validate(*args, **kwargs)
+
+        def capture_test(*args, **kwargs):
+            events.append("test")
+            assert os.path.isfile(os.path.join(cli.trainer.default_root_dir, "export", "model.pt"))
+            return test(*args, **kwargs)
+
+        def forbid_fit(*args, **kwargs):
+            raise AssertionError("Zero-shot train must never call fit")
+
+        # Install instance spies after CLI parsing so Trainer method signatures remain intact.
+        monkeypatch.setattr(cli.trainer, "validate", capture_validate)
+        monkeypatch.setattr(cli.trainer, "test", capture_test)
+        monkeypatch.setattr(cli.trainer, "fit", forbid_fit)
+        return run_subcommand(cli, subcommand)
+
+    monkeypatch.setattr(LitCLI, "_run_subcommand", observe_dispatch)
+    entry = runpy.run_path(os.path.join(PROJECT_ROOT, "evaluation", "visionlab", "train.py"))
+    cli = entry["main"](["train", "--data", "mvtec", "--model", "winclip", "--data.init_args.root", root,
+                         "--data.init_args.val_split_mode", "same_as_test", "--trainer.accelerator", "cpu",
+                         "--trainer.devices", "1", "--trainer.logger", "false", "--trainer.enable_progress_bar", "false",
+                         "--trainer.enable_model_summary", "false", "--trainer.default_root_dir", os.path.join(tmp_path, "runs")])
+    assert events == ["validate", "test"] and cli.trainer.optimizers == []
+    assert set(cli.model.last_metrics) == {"val", "test"}
+    assert not any(name.endswith(".ckpt") for _, _, files in os.walk(cli.trainer.default_root_dir) for name in files)
+    with open(os.path.join(cli.trainer.default_root_dir, "run.json"), encoding="utf-8") as stream:
+        record = json.load(stream)
+    assert record["checkpoint"] is None and record["teacher_weights"]["path"] == winclip_cli_assets
+
+
+def test_winclip_cli_preserves_one_class_and_direct_subcommand_dispatch(monkeypatch):
+    """Keep the parent's fit path for ONE_CLASS and all direct subcommands while switching only zero/few-shot train."""
+    from types import SimpleNamespace
+    from lightning.pytorch.cli import LightningCLI
+    from visionlab.anomaly_detection.common.learning_type import LearningType
+
+    calls = []
+
+    def parent_run(self, command):
+        calls.append(("parent", command))
+
+    monkeypatch.setattr(LightningCLI, "_run_subcommand", parent_run)
+    for learning_type in LearningType:
+        for train_and_test in (False, True):
+            for command in ("fit", "validate", "test", "predict"):
+                calls.clear()
+                fake = SimpleNamespace(
+                    train_and_test=train_and_test, model=SimpleNamespace(learning_type=learning_type), datamodule=object(),
+                    trainer=SimpleNamespace(validate=lambda **kwargs: calls.append(("validate", kwargs))),
+                    config={command: {"ckpt_path": "resume.ckpt"}}, record_run=lambda: calls.append(("record",)),
+                )
+                # A real uninitialized CLI instance preserves super() binding without constructing old models.
+                cli = object.__new__(LitCLI)
+                cli.__dict__.update(fake.__dict__)
+                cli._run_subcommand(command)
+                if train_and_test and command == "fit" and learning_type in (LearningType.ZERO_SHOT, LearningType.FEW_SHOT):
+                    assert calls[0] == ("validate", {"model": fake.model, "datamodule": fake.datamodule,
+                                                      "ckpt_path": "resume.ckpt"})
+                else:
+                    assert calls[0] == ("parent", command)
+                assert calls[-1] == ("record",)
+
+
 @pytest.fixture(scope="module")
 def dsr_cli_weights(tmp_path_factory):
     """Create a synthetic full-size VQ state for DSR CLI construction without external weights."""

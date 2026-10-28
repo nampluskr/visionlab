@@ -1,4 +1,4 @@
-# evaluation/visionlab/train.py: offline native Lightning entry point with fit-then-test train command
+# evaluation/visionlab/train.py: offline native Lightning entry point with learning-type-aware train command
 
 import os
 import sys
@@ -22,7 +22,7 @@ def main(args=None):
     if train_and_test:
         args[0] = "fit"
     logging.basicConfig(level=logging.INFO)
-    cli = LitCLI(args=args)
+    cli = LitCLI(args=args, train_and_test=train_and_test)
     if train_and_test:
         cli.trainer.test(model=cli.model, datamodule=cli.datamodule, ckpt_path=None)
         cli.record_run()

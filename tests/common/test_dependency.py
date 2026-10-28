@@ -17,6 +17,9 @@ SKLEARN_IMPORTS = (
      "SparseRandomProjection", "_sparse_random_matrix", "sklearn.utils.random", "sample_without_replacement"),
     ("anomaly_detection/models/cfa/model.py", "CfaModel", "initialize_centroid", "sklearn.cluster", "KMeans"),
 )
+REGEX_IMPORTS = (
+    ("anomaly_detection/models/winclip/tokenizer.py", "SimpleTokenizer", "__init__", "regex"),
+)
 LIGHTNING_FILES = {
     "anomaly_detection/data/mvtec/lightning_data.py", "anomaly_detection/data/visa/lightning_data.py",
     "anomaly_detection/models/stfpm/lightning_model.py", "anomaly_detection/common/lightning_visualizer.py",
@@ -36,6 +39,7 @@ LIGHTNING_FILES = {
     "anomaly_detection/models/csflow/lightning_model.py",
     "anomaly_detection/models/ganomaly/lightning_model.py",
     "anomaly_detection/models/dsr/lightning_model.py",
+    "anomaly_detection/models/winclip/lightning_model.py",
     "anomaly_detection/trainers/lightning_cli.py",
 }
 
@@ -110,6 +114,8 @@ def classified_modules():
                  name in ("model.py", "loss.py")) or \
                 (relative.startswith("anomaly_detection/models/dsr/") and
                  name in ("model.py", "anomaly_generator.py", "loss.py")) or \
+                (relative.startswith("anomaly_detection/models/winclip/") and
+                 name in ("clip.py", "tokenizer.py", "model.py", "utils.py", "prompting.py")) or \
                 name == "__init__.py":
             group = "pure"
         else:
@@ -189,14 +195,41 @@ def allowed_sklearn_import_lines(path):
     return allowed
 
 
+def allowed_regex_import_lines(path):
+    """Allow one unaliased regex import directly inside the designated tokenizer constructor."""
+    relative = os.path.relpath(path, SOURCE_ROOT).replace(os.sep, "/")
+    rules = [rule for rule in REGEX_IMPORTS if rule[0] == relative]
+    if not rules:
+        return set()
+    with open(path, encoding="utf-8") as stream:
+        tree = ast.parse(stream.read(), filename=path)
+    allowed = set()
+    for _, class_name, method_name, module in rules:
+        matches = [node.lineno for cls in tree.body
+                   if isinstance(cls, ast.ClassDef) and cls.name == class_name
+                   for method in cls.body
+                   if isinstance(method, ast.FunctionDef) and method.name == method_name
+                   for node in method.body
+                   if isinstance(node, ast.Import) and len(node.names) == 1
+                   and node.names[0].name == module and node.names[0].asname is None]
+        if len(matches) == 1:
+            allowed.update(matches)
+    return allowed
+
+
 def test_no_reference_imports_in_source():
-    """Keep framework boundaries and allow only the two designated fitting-time sklearn imports."""
+    """Keep framework boundaries and allow only designated lazy sklearn and regex imports."""
     for path in python_files(SOURCE_ROOT):
         relative = os.path.relpath(path, SOURCE_ROOT).replace(os.sep, "/")
         allowed = allowed_sklearn_import_lines(path)
+        allowed_regex = allowed_regex_import_lines(path)
         for name, line in source_imports(path):
-            assert name not in ("anomalib", "sklearn", "scikit-learn") or \
+            assert name not in ("anomalib", "open_clip", "ftfy", "sklearn", "scikit-learn") or \
                 (name == "sklearn" and line in allowed), f"{path}:{line}: {name}"
+            if name == "regex":
+                assert line in allowed_regex, f"{path}:{line}: {name}"
+            if relative.startswith("anomaly_detection/models/winclip/"):
+                assert name not in ("timm", "torchvision", "kornia"), f"{path}:{line}: {name}"
             if name in ("lightning", "pytorch_lightning"):
                 assert relative in LIGHTNING_FILES, f"{path}:{line}: {name}"
 

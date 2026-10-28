@@ -86,6 +86,11 @@ class LocalWinClip(models.WinClip):
         winclip_torch_model.PRETRAINED = weights_file
         super().__init__(**kwargs)
 
+    def on_save_checkpoint(self, checkpoint):
+        # anomalib's encode_image never removes its forward hook and the local function cannot be pickled.
+        self.model.clip.visual.patch_dropout._forward_hooks.clear()
+        super().on_save_checkpoint(checkpoint)
+
 
 class LocalFre(models.Fre):
     """Fre using the shared ten-epoch budget by user decision."""

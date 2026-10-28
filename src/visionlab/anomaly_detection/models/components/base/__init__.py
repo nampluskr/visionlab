@@ -20,6 +20,7 @@ Example:
 # Copyright (C) 2022-2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+from .buffer_list import BufferListMixin
 from .dynamic_buffer import DynamicBufferMixin
 
-__all__ = ["DynamicBufferMixin"]
+__all__ = ["BufferListMixin", "DynamicBufferMixin"]

@@ -46,7 +46,7 @@
 
 ## D-8. 후처리 보정과 평가 상태의 분리
 
-- **선택**: PostProcessor의 image/pixel min·max와 F1 기반 임계값은 fit validation 전체에서 수집해 epoch 종료에 확정한다. standalone validate·test·predict는 저장 상태를 읽기만 한다. 정규화는 임계값 중심 변환 `clamp((x-threshold)/(max-min)+0.5, 0, 1)`을 사용한다. raw 예측은 보존하고 후처리 결과를 별도로 둔다. validation은 raw AUROC, test는 raw AUROC와 후처리 F1을 기록한다. 여기서 raw AUROC는 점수의 순서를 보존하는 계산이다(D-20).
+- **선택**: PostProcessor의 image/pixel min·max와 F1 기반 임계값은 fit validation 전체에서 수집해 epoch 종료에 확정한다. standalone validate·test·predict는 저장 상태를 읽기만 한다. 단 학습이 없는 zero-shot·few-shot 모델(WinCLIP)은 validate 단계가 fit validation의 역할을 하므로 그 VALIDATING 단계에서 통계를 만들고 확정한다(원본 anomalib도 zero-shot에서 validate 하나로 통계를 만든다. Phase 18, 사용자 결정 2026-10-28). test·predict는 읽기만 한다. 정규화는 임계값 중심 변환 `clamp((x-threshold)/(max-min)+0.5, 0, 1)`을 사용한다. raw 예측은 보존하고 후처리 결과를 별도로 둔다. validation은 raw AUROC, test는 raw AUROC와 후처리 F1을 기록한다. 여기서 raw AUROC는 점수의 순서를 보존하는 계산이다(D-20).
 - **근거**: 같은 validation에서 고른 임계값의 F1을 독립 평가 결과로 내지 않는다. 테스트 정답으로 보정하지 않는다.
 - **배제한 대안**: 단순 `(score-min)/(max-min)` 정규화. 테스트 배치나 배치별 범위로 재보정. anomalib 2.0.0 EfficientAD처럼 `on_validation_start`에서 무조건 quantile을 갱신하는 방식.
 
@@ -151,6 +151,10 @@ visionlab/                                      # project root
 │   ├── 17_dsr/
 │   │   ├── test_dsr.py                         # pure model, three forward modes, anomaly generator
 │   │   └── test_dsr_lightning.py               # FR-6, FR-12, FR-14, D-19, two-stage manual optimization
+│   ├── 18_winclip/
+│   │   ├── test_clip.py                        # independent CLIP and BPE tokenizer against open_clip, D-28
+│   │   ├── test_winclip.py                     # pure model, window scores, hook cleanup, resize
+│   │   └── test_winclip_lightning.py           # FR-6, FR-12, FR-14, D-19, D-8 zero-shot calibration, export
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -161,7 +165,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml, ganomaly.yaml, dsr.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml, ganomaly.yaml, dsr.yaml, winclip.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -179,6 +183,9 @@ visionlab/                                      # project root
         │   │   │   ├── model.py                # CflowModel (was torch_model.py)
         │   │   │   └── utils.py                # cflow_head, get_logp, positional_encoding_2d (imports FrEIA, D-26)
         │   │   ├── components/                 # copied from anomalib models/components, only what is used (D-11, D-18)
+        │   │   │   ├── base/
+        │   │   │   │   ├── buffer_list.py      # copied: BufferListMixin (Phase 18)
+        │   │   │   │   └── dynamic_buffer.py   # copied: DynamicBufferMixin
         │   │   │   ├── feature_extractors/     # copied: TimmFeatureExtractor, feature shape helpers
         │   │   │   ├── flow/
         │   │   │   │   └── all_in_one_block.py # copied: AllInOneBlock, imports FrEIA InvertibleModule (D-26)
@@ -230,13 +237,23 @@ visionlab/                                      # project root
         │   │   │   ├── lightning_model.py      # SupersimplenetLitModel, native LightningModule
         │   │   │   ├── loss.py                 # SSNLoss
         │   │   │   └── model.py                # SupersimplenetModel (was torch_model.py)
-        │   │   └── uflow/                      # copied from anomalib models/image/uflow (D-18)
+        │   │   ├── uflow/                      # copied from anomalib models/image/uflow (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_map.py          # AnomalyMapGenerator (scipy, mpmath)
+        │   │   │   ├── feature_extraction.py   # get_feature_extractor, LayerNormFeatureExtractor, CaitFeatureExtractor
+        │   │   │   ├── lightning_model.py      # UflowLitModel, native LightningModule, 256 input (D-27)
+        │   │   │   ├── loss.py                 # UFlowLoss
+        │   │   │   └── model.py                # UflowModel, imports FrEIA GraphINN (D-26, was torch_model.py)
+        │   │   └── winclip/                    # copied from anomalib models/image/winclip, CLIP independent (D-18, D-28)
         │   │       ├── __init__.py
-        │   │       ├── anomaly_map.py          # AnomalyMapGenerator (scipy, mpmath)
-        │   │       ├── feature_extraction.py   # get_feature_extractor, LayerNormFeatureExtractor, CaitFeatureExtractor
-        │   │       ├── lightning_model.py      # UflowLitModel, native LightningModule, 256 input (D-27)
-        │   │       ├── loss.py                 # UFlowLoss
-        │   │       └── model.py                # UflowModel, imports FrEIA GraphINN (D-26, was torch_model.py)
+        │   │       ├── bpe_simple_vocab_16e6.txt.gz # CLIP BPE vocabulary copied from open_clip (D-28)
+        │   │       ├── clip.py                     # CLIP, VisionTransformer, Transformer, independent of open_clip (D-28)
+        │   │       ├── LICENSE                     # MIT notices for the CLIP code and vocabulary
+        │   │       ├── lightning_model.py          # WinClipLitModel, native LightningModule (zero-shot, no optimizer)
+        │   │       ├── model.py                    # WinClipModel (was torch_model.py)
+        │   │       ├── prompting.py                # create_prompt_ensemble
+        │   │       ├── tokenizer.py                # SimpleTokenizer, tokenize (lazy regex import, D-28)
+        │   │       └── utils.py                    # cosine_similarity, class_scores, harmonic_aggregation, make_masks
         │   ├── common/                         # new, replaces anomalib parts outside models (D-7, D-18)
         │   │   ├── batch.py                    # Batch, InferenceBatch (anomalib.data), Phase 0
         │   │   ├── evaluator.py                # Evaluator (anomalib.metrics)
@@ -375,3 +392,12 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **근거**: Dataset이 이미지와 mask를 256으로 고정하고(D-6) `PreProcessor`에 resize가 없다. 데이터 생성자에 `image_size`를 더하는 방식은 D-10이 배제한 대안을 되살리고 데이터 생성자 시그니처 검사(FR-17)와 공유 코드, 데이터 테스트를 바꿔야 한다. 비교의 목적은 같은 조건에서의 이식 정확도이며 레퍼런스도 논문의 기본 backbone(`mcait`)이 아닌 `resnet18`을 쓴다. 256은 학습 시간과 메모리도 줄인다.
 - **배제한 대안**: 데이터 생성자에 `image_size` 추가. 증강 훅으로 resize를 넣는 방식. 모델 안에서 448로 보간하는 방식(원본 알고리즘 변경).
 - **남은 한계**: 원본이 의도한 448 입력의 성능은 확인하지 않았다. 기본 backbone `mcait`와 `wide_resnet50_2`도 확인하지 않았다(로컬 가중치 없음 또는 미실행, Phase 14).
+
+## D-28. CLIP은 독립 구현하고 토크나이저의 regex를 지연 의존으로 허용한다
+
+- **선택**: WinCLIP이 쓰는 open_clip의 CLIP(ViT-B-16-plus-240)은 이미지·텍스트 인코더와 BPE 토크나이저를 순수 torch로 독립 구현한다. `src/visionlab`은 open_clip, timm, torchvision, ftfy를 import하지 않는다. 모듈과 파라미터 이름을 open_clip과 같게 해 로컬 가중치 `open_clip_pytorch_model.bin`(순수 `OrderedDict`, 키 302개)을 `strict`로 불러온다. 설치된 open_clip은 `tests/18_winclip`과 `evaluation/anomalib/compare_outputs.py`의 비교에만 쓴다(Phase 18, 사용자 결정 2026-10-28). 토크나이저의 `regex`는 `SimpleTokenizer.__init__` 안의 지연 import 한 곳만 허용한다(D-25 방식). `ftfy`는 프롬프트가 고정 ASCII 문자열이라 쓰지 않는다. BPE 어휘 `bpe_simple_vocab_16e6.txt.gz`는 OpenAI CLIP 유래(MIT)로 open_clip 배포본에서 바이트 그대로 복사해 모델 패키지에 두고, 두 저작권 표기를 담은 `LICENSE`를 옆에 둔다.
+- **적용 범위**: WinCLIP의 CLIP과 토크나이저에 한한다. 순수 CLIP 클래스는 파일을 읽지 않으며(D-19), 가중치 주입은 `WinClipLitModel`이 `paths.toml [teachers]`의 `winclip_clip`으로 한다. 입력 크기는 D-27의 통일을 따라 256x256 입력을 받는다. 순수 `WinClipModel.encode_image`는 입력이 CLIP 이미지 크기(240)와 다를 때만 bicubic antialias로 크기를 맞추고, 최종 anomaly map은 원래 입력 크기로 보간한다. D-27이 배제한 "모델 안에서 보간하는 방식"과 달리 240 입력에서는 원본과 같다. 이렇게 해 `common/`을 고치지 않고 export한 Predictor도 같은 resize를 한다(채널별 정규화와 보간은 교환 가능하다. Phase 18, 사용자 승인 2026-10-28). `tests/common/test_dependency.py`가 허용 목록 밖의 `regex` import와 `open_clip`, `ftfy` import, winclip 파일의 `timm`, `torchvision` import를 차단한다. `tests/18_winclip/test_clip.py`가 `regex`를 차단한 자식 프로세스에서 모듈 import와 CLIP 생성은 성공하고 토크나이저 생성만 `ModuleNotFoundError`를 내는 것을 확인한다.
+- **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다(D-25와 같다). `regex`는 PyTorch 위의 라이브러리가 아니며, 이 결정은 그 범위를 토크나이저 생성 시점의 예외로 넓혀 읽는다. 텍스트 임베딩은 export의 `_text_embeddings` 버퍼에 들어 있어 export를 읽는 순수 추론 경로(Predictor)는 토크나이저를 쓰지 않는다. INTENT는 고치지 않는다.
+- **근거**: open_clip은 timm, torchvision, ftfy에 의존하고 `pretrained` 이름으로 다운로드를 시도한다(NFR-3). 독립 구현은 309줄(`clip.py` 165줄, `tokenizer.py` 144줄), 파라미터 208,377,345개이며, 같은 가중치로 CPU에서 open_clip과 출력이 일치했다(이미지·window·텍스트 임베딩, 점수와 anomaly map의 최대 차이 0.0, 토크나이저 462개 문장 정수 일치).
+- **배제한 대안**: open_clip을 `src/visionlab`에서 import하는 방식(추론 환경에 timm, torchvision, ftfy가 필요하고 다운로드 경로가 남는다). 토크나이저를 `regex` 없이 구현하는 방식(`\p{L}`, `\p{N}` 분할을 표준 `re`로 같게 만들 수 없다). 어휘 파일을 로컬 가중치 폴더에 두는 방식(자산이 저장소 밖에 흩어진다).
+- **남은 한계**: 새 프로세스에서의 완전한 torchvision 차단은 기존 Predictor와 torchmetrics의 import 구조 때문에 보장하지 않는다. few-shot 경로(`k_shot > 0`)는 이식만 하고 실행하지 않았으며 `few_shot_source`와 `apply_transform=True`는 `NotImplementedError`다(Phase 18).

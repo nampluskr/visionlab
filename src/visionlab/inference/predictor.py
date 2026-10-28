@@ -17,6 +17,7 @@ from visionlab.anomaly_detection.models.supersimplenet.model import Supersimplen
 from visionlab.anomaly_detection.models.draem.model import DraemModel
 from visionlab.anomaly_detection.models.ganomaly.model import GanomalyModel
 from visionlab.anomaly_detection.models.dsr.model import DsrModel
+from visionlab.anomaly_detection.models.winclip.model import WinClipModel
 from visionlab.anomaly_detection.models.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
 from visionlab.anomaly_detection.models.components.classification import FeatureScalingMethod
 from visionlab.utils.io import load_export
@@ -39,6 +40,7 @@ class Predictor:
                   "reverse_distillation": ReverseDistillationModel, "cfa": CfaModel, "fre": FREModel,
                   "supersimplenet": SupersimplenetModel, "draem": DraemModel, "ganomaly": GanomalyModel}
         models["dsr"] = DsrModel
+        models["winclip"] = WinClipModel
         if exported["model_name"] == "fastflow":
             from visionlab.anomaly_detection.models.fastflow.model import FastflowModel
 

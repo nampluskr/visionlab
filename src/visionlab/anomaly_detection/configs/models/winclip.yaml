@@ -1,0 +1,12 @@
+# src/visionlab/anomaly_detection/configs/models/winclip.yaml: native zero-shot WinCLIP with local CLIP weights
+# Pass --data <name> before --model winclip.
+model:
+  class_path: visionlab.anomaly_detection.models.winclip.lightning_model.WinClipLitModel
+  init_args:
+    class_name: null
+    k_shot: 0
+    scales: [2, 3]
+    few_shot_source: null
+    visualizer: false
+
+trainer: {}

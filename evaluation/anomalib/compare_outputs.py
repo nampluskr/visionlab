@@ -1984,11 +1984,129 @@ def compare_dsr(checks, information, samples, reference_checkpoint):
         gc.collect()
 
 
+def winclip_info(information, name, expected, actual):
+    """Record a CPU tensor difference without contributing to the PASS/FAIL verdict."""
+    same_shape = expected.shape == actual.shape
+    difference = (expected - actual).abs().max().item() if same_shape and expected.numel() else None
+    entry = {"name": name, "informational_only": True,
+             "reference_shape": list(expected.shape), "native_shape": list(actual.shape),
+             "max_abs_difference": difference if difference is not None and math.isfinite(difference) else None}
+    information.append(entry)
+    print(f"INFO {name}: {entry}")
+
+
+def compare_winclip_forwards(checks, information, reference, native, config, data, samples):
+    """Compare identical 240-pixel CPU inputs and report the native 256-pixel path separately."""
+    from torchvision.transforms import InterpolationMode
+    from torchvision.transforms.v2 import Resize
+    from visionlab.anomaly_detection.models.winclip.lightning_model import CLIP_MEAN, CLIP_STD
+
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if len(dataset) < samples:
+        raise ValueError(f"Expected {samples} {data} test samples, found {len(dataset)}")
+    images = torch.stack([dataset[index][0] for index in range(samples)])
+    record_check(checks, f"FR-5 {data} inputs", images.shape == (samples, 3, 256, 256),
+                 {"root": config["root"], "category": config["category"],
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:samples]]})
+    processor = PreProcessor(mean=CLIP_MEAN, std=CLIP_STD)
+    resized = torch.nn.functional.interpolate(images, size=(240, 240), mode="bicubic",
+                                               align_corners=False, antialias=True)
+    torchvision_resized = Resize((240, 240), interpolation=InterpolationMode.BICUBIC, antialias=True)(images)
+    winclip_info(information, f"{data} torch / torchvision resize", torchvision_resized, resized)
+    inputs = processor(resized)
+    with torch.no_grad():
+        expected, actual = reference(inputs), native(inputs)
+        for name in ("pred_score", "anomaly_map"):
+            compare_tensor(checks, f"FR-5 {data} 240 {name}", getattr(expected, name), getattr(actual, name),
+                           rtol=1e-5, atol=1e-6)
+        record_check(checks, f"FR-5 {data} 240 shapes",
+                     expected.pred_score.shape == actual.pred_score.shape == (samples,) and
+                     expected.anomaly_map.shape == actual.anomaly_map.shape == (samples, 240, 240),
+                     {"pred_score": list(actual.pred_score.shape), "anomaly_map": list(actual.anomaly_map.shape)})
+        # The reference accumulates local hooks; diagnostics must release them between forwards.
+        reference.clip.visual.patch_dropout._forward_hooks.clear()
+        expected_embeddings = reference.encode_image(inputs)
+        reference.clip.visual.patch_dropout._forward_hooks.clear()
+        actual_embeddings = native.encode_image(inputs)
+        winclip_info(information, f"{data} image embeddings", expected_embeddings[0], actual_embeddings[0])
+        for scale, expected_window, actual_window in zip(native.scales, expected_embeddings[1],
+                                                         actual_embeddings[1], strict=True):
+            winclip_info(information, f"{data} scale {scale} window embeddings", expected_window, actual_window)
+        native_256 = native(processor(images))
+        record_check(checks, f"FR-4 {data} native 256 shapes",
+                     native_256.pred_score.shape == (samples,) and
+                     native_256.anomaly_map.shape == (samples, 256, 256),
+                     {"pred_score": list(native_256.pred_score.shape),
+                      "anomaly_map": list(native_256.anomaly_map.shape)})
+        winclip_info(information, f"{data} 256 path pred_score", expected.pred_score, native_256.pred_score)
+        expected_256 = torch.nn.functional.interpolate(expected.anomaly_map.unsqueeze(1), size=(256, 256),
+                                                        mode="bilinear").squeeze(1)
+        winclip_info(information, f"{data} 256 map / resized reference 240 map",
+                     expected_256, native_256.anomaly_map)
+
+
+def compare_winclip(checks, information, samples):
+    """Compare local CLIP injection and zero-shot CPU inference on both configured categories."""
+    import gc
+
+    from anomalib.models import WinClip
+    from anomalib.models.image.winclip import torch_model as reference_module
+    from visionlab.anomaly_detection.models.winclip.lightning_model import WinClipLitModel
+
+    record_check(checks, "FR-6 constructor signature", signature_fields(WinClip) == signature_fields(WinClipLitModel),
+                 {"reference": signature_fields(WinClip), "native": signature_fields(WinClipLitModel)})
+    native_lit = WinClipLitModel(visualizer=False).cpu().eval()
+    native = native_lit.model
+    local_state = torch.load(native_lit.teacher_weights_path, weights_only=True, map_location="cpu")
+    actual_state = native.clip.state_dict()
+    mismatches = sorted(key for key in local_state.keys() & actual_state.keys()
+                        if not torch.equal(local_state[key], actual_state[key]))
+    record_check(checks, "FR-23 native CLIP / local file", local_state.keys() == actual_state.keys() and not mismatches,
+                 {"weights": native_lit.teacher_weights_path, "keys": len(actual_state), "mismatches": mismatches})
+    del local_state, actual_state
+    previous = reference_module.PRETRAINED
+    reference_module.PRETRAINED = native_lit.teacher_weights_path
+    try:
+        for data in ("mvtec", "visa"):
+            reference = None
+            try:
+                config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs",
+                                           "data", f"{data}.yaml")
+                with open(config_path, encoding="utf-8") as stream:
+                    config = yaml.safe_load(stream)["data"]["init_args"]
+                reference = reference_module.WinClipModel(class_name=config["category"], scales=(2, 3),
+                                                            apply_transform=False).cpu().eval()
+                expected_state, actual_state = reference.clip.state_dict(), native.clip.state_dict()
+                mismatches = sorted(key for key in expected_state.keys() & actual_state.keys()
+                                    if not torch.equal(expected_state[key], actual_state[key]))
+                record_check(checks, f"FR-23 {data} reference / native CLIP",
+                             expected_state.keys() == actual_state.keys() and not mismatches,
+                             {"keys": len(actual_state), "mismatches": mismatches})
+                del expected_state, actual_state
+                native.setup(config["category"])
+                compare_tensor(checks, f"FR-5 {data} text embeddings", reference.text_embeddings,
+                               native.text_embeddings, rtol=1e-5, atol=1e-6)
+                record_check(checks, f"FR-5 {data} text embedding shape",
+                             reference.text_embeddings.shape == native.text_embeddings.shape == (2, 640),
+                             list(native.text_embeddings.shape))
+                compare_winclip_forwards(checks, information, reference, native, config, data, samples)
+            except Exception as error:
+                record_check(checks, f"WinCLIP {data}", False, f"{type(error).__name__}: {error}")
+            finally:
+                del reference
+                gc.collect()
+    finally:
+        reference_module.PRETRAINED = previous
+        del native, native_lit
+        gc.collect()
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly", "dsr"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly", "dsr", "winclip"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -2027,8 +2145,17 @@ def main():
         rtol, atol = GANOMALY_RTOL, GANOMALY_ATOL
     elif args.model == "dsr":
         rtol, atol = DSR_RTOL, DSR_ATOL
+    elif args.model == "winclip":
+        rtol, atol = 1e-5, 1e-6
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "dsr":
+    if args.model == "winclip":
+        if args.reference_checkpoint:
+            parser.error("WinCLIP comparison uses local CLIP weights, not --reference-checkpoint")
+        try:
+            compare_winclip(checks, information, args.samples)
+        except Exception as error:
+            record_check(checks, "WinCLIP construction / FR-23 / FR-5", False, f"{type(error).__name__}: {error}")
+    elif args.model == "dsr":
         try:
             compare_dsr(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -2117,7 +2244,7 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly", "dsr"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly", "dsr", "winclip"):
         report["information"] = information
     if args.model == "draem":
         report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}
