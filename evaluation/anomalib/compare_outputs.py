@@ -112,6 +112,8 @@ CSFLOW_RTOL = 1e-5
 CSFLOW_ATOL = 1e-6
 GANOMALY_RTOL = 1e-5
 GANOMALY_ATOL = 1e-6
+DSR_RTOL = 1e-5
+DSR_ATOL = 1e-6
 
 
 def signature_fields(model_class, enum_values=False):
@@ -1766,11 +1768,227 @@ def compare_ganomaly(checks, information, samples, reference_checkpoint):
     compare_ganomaly_components(checks)
 
 
+def compare_dsr_forwards(checks, information, reference, native, data, samples):
+    """Compare raw evaluation and CPU training outputs, then record GPU differences separately."""
+    config_path = os.path.join(PROJECT_ROOT, "src", "visionlab", "anomaly_detection", "configs", "data", f"{data}.yaml")
+    with open(config_path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)["data"]["init_args"]
+    dataset_class = MVTecDataset if data == "mvtec" else VisADataset
+    dataset = dataset_class(root=config["root"], category=config["category"], split="test")
+    if len(dataset) < samples:
+        raise ValueError(f"Expected {samples} {data} samples, found {len(dataset)}")
+    images = torch.stack([dataset[index][0] for index in range(samples)])
+    # Antialias resize can overshoot [0, 1] by float rounding.
+    record_check(checks, f"FR-5 {data} inputs",
+                 images.shape == (samples, 3, 256, 256) and images.min() >= -1e-5 and images.max() <= 1 + 1e-5,
+                 {"category": config["category"], "shape": list(images.shape),
+                  "min": images.min().item(), "max": images.max().item(), "normalization": None,
+                  "image_paths": [sample["image_path"] for sample in dataset.samples[:samples]]})
+    for model in (reference, native):
+        model.cpu().eval()
+    with torch.no_grad():
+        expected, actual = reference(images), native(images)
+    for name in ("pred_score", "anomaly_map"):
+        compare_tensor(checks, f"FR-5 {data} eval {name}", getattr(expected, name), getattr(actual, name),
+                       rtol=DSR_RTOL, atol=DSR_ATOL)
+    record_check(checks, f"FR-5 {data} eval shapes",
+                 expected.pred_score.shape == actual.pred_score.shape == (samples,) and
+                 expected.anomaly_map.shape == actual.anomaly_map.shape == (samples, 256, 256),
+                 {"pred_score": list(actual.pred_score.shape), "anomaly_map": list(actual.anomaly_map.shape)})
+    del expected, actual
+    tensor_cuda, cuda_available = torch.Tensor.cuda, torch.cuda.is_available
+    has_cuda = cuda_available()
+    try:
+        torch.Tensor.cuda = lambda self: self
+        # Perlin's default device must also stay on CPU when a GPU is installed.
+        torch.cuda.is_available = lambda: False
+        compare_dsr_training(checks, information, reference, native, images, data, gpu=False)
+    finally:
+        torch.Tensor.cuda = tensor_cuda
+        torch.cuda.is_available = cuda_available
+    if not has_cuda:
+        entry = {"name": f"{data} DSR GPU training comparisons", "informational_only": True, "skipped": True,
+                 "reason": "CUDA is unavailable; CPU training comparisons provide the FR-5 verdict."}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+        return
+    try:
+        try:
+            compare_dsr_training(checks, information, reference, native, images.to("cuda"), data, gpu=True)
+        finally:
+            reference.cpu()
+            native.cpu()
+    except Exception as error:
+        entry = {"name": f"{data} DSR GPU training comparisons", "informational_only": True,
+                 "reason": "GPU kernels are not bit-reproducible; VQ argmin near-ties can flip",
+                 "error": f"{type(error).__name__}: {error}"}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+
+
+def compare_dsr_training(checks, information, reference, native, images, data, gpu):
+    """Run identical seeded stage comparisons with CPU verdicts or GPU-only informational records."""
+    from anomalib.models.image.dsr.anomaly_generator import DsrAnomalyGenerator as ReferenceDsrGenerator
+    from anomalib.models.image.dsr.loss import DsrSecondStageLoss as ReferenceSecondLoss
+    from anomalib.models.image.dsr.loss import DsrThirdStageLoss as ReferenceThirdLoss
+    from visionlab.anomaly_detection.models.dsr.anomaly_generator import DsrAnomalyGenerator
+    from visionlab.anomaly_detection.models.dsr.loss import DsrSecondStageLoss, DsrThirdStageLoss
+
+    def report_keys(name, passed, details):
+        """Keep GPU key diagnostics out of the shared PASS/FAIL collection."""
+        if not gpu:
+            record_check(checks, name, passed, details)
+            return
+        entry = {"name": f"GPU {name}", "informational_only": True, "equal": bool(passed), "details": details,
+                 "reason": "GPU kernels are not bit-reproducible; VQ argmin near-ties can flip"}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+
+    def report_tensor(name, expected, actual):
+        """Apply fixed CPU tolerances or record GPU shapes and maximum absolute differences without a verdict."""
+        if not gpu:
+            compare_tensor(checks, name, expected, actual, rtol=DSR_RTOL, atol=DSR_ATOL)
+            return
+        same_shape = expected.shape == actual.shape
+        difference = (expected - actual).abs().max().item() if same_shape and expected.numel() else None
+        entry = {"name": f"GPU {name}", "informational_only": True,
+                 "reference_shape": list(expected.shape), "native_shape": list(actual.shape),
+                 "max_abs_difference": difference if difference is not None and math.isfinite(difference) else None,
+                 "reason": "GPU kernels are not bit-reproducible; VQ argmin near-ties can flip"}
+        information.append(entry)
+        print(f"INFO {entry['name']}: {entry}")
+
+    for model in (reference, native):
+        model.to(images.device).train()
+    devices = list(range(torch.cuda.device_count())) if gpu else []
+    with torch.random.fork_rng(devices=devices), torch.no_grad():
+        torch.manual_seed(42)
+        reference_generator = ReferenceDsrGenerator()
+        torch.manual_seed(42)
+        native_generator = DsrAnomalyGenerator()
+        torch.manual_seed(43)
+        expected_mask = reference_generator.augment_batch(images)
+        torch.manual_seed(43)
+        actual_mask = native_generator.augment_batch(images)
+        report_tensor(f"{data} DSR augmentation mask", expected_mask, actual_mask)
+        torch.manual_seed(44)
+        expected = reference(images, expected_mask)
+        torch.manual_seed(44)
+        actual = native(images, expected_mask)
+        report_keys(f"FR-5 {data} second-stage keys", list(expected) == list(actual),
+                    {"reference": list(expected), "native": list(actual)})
+        for name in sorted(expected.keys() & actual.keys()):
+            report_tensor(f"FR-5 {data} second-stage {name}", expected[name], actual[name])
+        losses = []
+        for output, criterion in ((expected, ReferenceSecondLoss()), (actual, DsrSecondStageLoss())):
+            losses.append(criterion.to(images.device)(
+                output["recon_feat_hi"], output["recon_feat_lo"], output["embedding_bot"], output["embedding_top"],
+                images, output["obj_spec_image"], output["anomaly_map"], output["true_anomaly_map"],
+            ))
+        report_tensor(f"FR-5 {data} second-stage loss", losses[0], losses[1])
+        del expected, actual, losses, output
+        torch.manual_seed(42)
+        reference_perlin = ReferencePerlinAnomalyGenerator()
+        torch.manual_seed(42)
+        native_perlin = PerlinAnomalyGenerator()
+        torch.manual_seed(43)
+        expected_image, expected_mask = reference_perlin(images)
+        torch.manual_seed(43)
+        actual_image, actual_mask = native_perlin(images)
+        report_tensor(f"{data} Perlin augmentation image", expected_image, actual_image)
+        report_tensor(f"{data} Perlin augmentation mask", expected_mask, actual_mask)
+        torch.manual_seed(44)
+        expected = reference(expected_image)
+        torch.manual_seed(44)
+        actual = native(expected_image)
+        report_keys(f"FR-5 {data} third-stage keys", set(expected) == set(actual) == {"anomaly_map"},
+                    {"reference": list(expected), "native": list(actual)})
+        report_tensor(f"FR-5 {data} third-stage anomaly_map", expected["anomaly_map"], actual["anomaly_map"])
+        expected_loss = ReferenceThirdLoss().to(images.device)(expected["anomaly_map"], expected_mask)
+        actual_loss = DsrThirdStageLoss().to(images.device)(actual["anomaly_map"], expected_mask)
+        report_tensor(f"FR-5 {data} third-stage loss", expected_loss, actual_loss)
+
+
+def compare_dsr(checks, information, samples, reference_checkpoint):
+    """Check local VQ injection, pure initialization and strict shared-state comparisons on both datasets."""
+    import gc
+
+    from anomalib.models import Dsr
+    from anomalib.models.image.dsr.torch_model import DsrModel as ReferenceDsrModel
+    from visionlab.anomaly_detection.models.dsr.lightning_model import DsrLitModel
+    from visionlab.anomaly_detection.models.dsr.model import DsrModel
+
+    record_check(checks, "FR-6 constructor signature", signature_fields(Dsr) == signature_fields(DsrLitModel),
+                 {"reference": signature_fields(Dsr), "native": signature_fields(DsrLitModel)})
+    wrapper = DsrLitModel(post_processor=False, evaluator=False, visualizer=False)
+    teacher_path = wrapper.teacher_weights_path
+    local_state = torch.load(teacher_path, map_location="cpu", weights_only=True)
+    actual = wrapper.model.discrete_latent_model.state_dict()
+    mismatches = sorted(name for name in actual.keys() & local_state.keys() if not torch.equal(actual[name], local_state[name]))
+    record_check(checks, "FR-23 native local VQ parameters and buffers",
+                 actual.keys() == local_state.keys() and not mismatches,
+                 {"missing": sorted(local_state.keys() - actual.keys()), "unexpected": sorted(actual.keys() - local_state.keys()),
+                  "mismatches": mismatches, "weights": teacher_path, "sha256": file_sha256(teacher_path)})
+    del wrapper, actual
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)
+        reference = ReferenceDsrModel(0.2)
+        torch.random.default_generator.manual_seed(42)
+        native = DsrModel(0.2)
+    expected, actual = reference.state_dict(), native.state_dict()
+    mismatches = sorted(name for name in expected.keys() & actual.keys() if not torch.equal(expected[name], actual[name]))
+    entry = {"name": "seeded initial DSR state", "informational_only": True, "seed": 42,
+             "equal": expected.keys() == actual.keys() and not mismatches,
+             "missing": sorted(expected.keys() - actual.keys()), "unexpected": sorted(actual.keys() - expected.keys()),
+             "mismatches": mismatches}
+    information.append(entry)
+    print(f"INFO {entry['name']}: {entry}")
+    del expected, actual
+    state = None
+    try:
+        if reference_checkpoint:
+            checkpoint = torch.load(reference_checkpoint, map_location="cpu", weights_only=False, mmap=True)
+            state = {name.removeprefix("model."): value for name, value in checkpoint["state_dict"].items()
+                     if name.startswith("model.")}
+            if not state:
+                raise ValueError("Reference checkpoint has no model.* state")
+            del checkpoint
+            prefix = "discrete_latent_model."
+            vq_state = {name.removeprefix(prefix): value for name, value in state.items() if name.startswith(prefix)}
+            mismatches = sorted(name for name in vq_state.keys() & local_state.keys()
+                                if not torch.equal(vq_state[name], local_state[name]))
+            missing, unexpected = sorted(local_state.keys() - vq_state.keys()), sorted(vq_state.keys() - local_state.keys())
+            entry = {"name": "reference checkpoint VQ versus local file", "informational_only": True,
+                     "equal": not missing and not unexpected and not mismatches,
+                     "prefix": "model.discrete_latent_model.", "checkpoint_key_count": len(vq_state),
+                     "local_key_count": len(local_state), "missing": missing, "unexpected": unexpected,
+                     "mismatches": mismatches, "different_key_count": len(missing) + len(unexpected) + len(mismatches)}
+            information.append(entry)
+            print(f"INFO {entry['name']}: {entry}")
+            del vq_state
+        else:
+            state = reference.state_dict()
+        reference.load_state_dict(state, strict=True)
+        native.load_state_dict(state, strict=True)
+        record_check(checks, "FR-5 shared model strict restore", True,
+                     {"source": os.path.abspath(reference_checkpoint) if reference_checkpoint else "synthetic reference initial state"})
+        state = None
+        del local_state
+        for data in ("mvtec", "visa"):
+            try:
+                compare_dsr_forwards(checks, information, reference, native, data, samples)
+            except Exception as error:
+                record_check(checks, f"FR-5 {data}", False, f"{type(error).__name__}: {error}")
+    finally:
+        del reference, native, state
+        gc.collect()
+
+
 def main():
     """Run every comparison group and write a machine-readable PASS or FAIL manifest."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=("stfpm", "efficient_ad", "padim", "dfm", "dfkde", "patchcore",
-                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly"), required=True)
+                                          "reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly", "dsr"), required=True)
     parser.add_argument("--reference-checkpoint")
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
@@ -1807,8 +2025,15 @@ def main():
         rtol, atol = CSFLOW_RTOL, CSFLOW_ATOL
     elif args.model == "ganomaly":
         rtol, atol = GANOMALY_RTOL, GANOMALY_ATOL
+    elif args.model == "dsr":
+        rtol, atol = DSR_RTOL, DSR_ATOL
     print(f"Fixed tolerances: rtol={rtol}, atol={atol}, metric_atol={METRIC_ATOL}")
-    if args.model == "ganomaly":
+    if args.model == "dsr":
+        try:
+            compare_dsr(checks, information, args.samples, args.reference_checkpoint)
+        except Exception as error:
+            record_check(checks, "DSR construction / strict restore / FR-5", False, f"{type(error).__name__}: {error}")
+    elif args.model == "ganomaly":
         try:
             compare_ganomaly(checks, information, args.samples, args.reference_checkpoint)
         except Exception as error:
@@ -1892,12 +2117,16 @@ def main():
         record_check(checks, "metrics / post_processor", False, f"{type(error).__name__}: {error}")
     report = {"model": args.model, "rtol": rtol, "atol": atol, "metric_atol": METRIC_ATOL,
               "passed": all(check["passed"] for check in checks), "checks": checks}
-    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly"):
+    if args.model in ("reverse_distillation", "cfa", "fre", "supersimplenet", "draem", "fastflow", "cflow", "uflow", "csflow", "ganomaly", "dsr"):
         report["information"] = information
     if args.model == "draem":
         report["not_applicable"] = {"FR-23": "DRAEM has no pretrained backbone or teacher weights"}
     if args.model == "cflow":
         report["limitations"] = ["Manual training steps are not compared; assess one-epoch AUROC and train_loss_epoch separately."]
+    if args.model == "dsr":
+        report["limitations"] = [
+            "Manual Lightning training steps and epoch stage transitions are not compared; assess ten-epoch AUROC and train_loss_epoch separately.",
+        ]
     if args.model == "ganomaly":
         report["not_applicable"] = {"FR-23": "GANomaly has no pretrained weights; strict shared model state is checked instead"}
         report["limitations"] = [

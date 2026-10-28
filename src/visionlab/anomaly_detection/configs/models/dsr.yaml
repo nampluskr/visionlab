@@ -1,0 +1,11 @@
+# src/visionlab/anomaly_detection/configs/models/dsr.yaml: native DSR with local VQ weights and manual optimization
+# Pass --data <name> before --model dsr.
+model:
+  class_path: visionlab.anomaly_detection.models.dsr.lightning_model.DsrLitModel
+  init_args:
+    latent_anomaly_strength: 0.2
+    upsampling_train_ratio: 0.7
+    visualizer: false
+
+trainer:
+  num_sanity_val_steps: 0

@@ -13,6 +13,55 @@ from visionlab.utils import io as io_utils
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture(scope="module")
+def dsr_cli_weights(tmp_path_factory):
+    """Create a synthetic full-size VQ state for DSR CLI construction without external weights."""
+    import torch
+    from visionlab.anomaly_detection.models.dsr.model import DsrModel
+
+    path = os.path.join(str(tmp_path_factory.mktemp("dsr_cli")), "vq.pckl")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(23)
+        torch.save(DsrModel().discrete_latent_model.state_dict(), path)
+    return path
+
+
+@pytest.mark.parametrize("data,category", (("mvtec", "bottle"), ("visa", "candle")))
+@pytest.mark.parametrize("max_epochs", (None, 5))
+def test_dsr_config_merging_and_output_name(tmp_path, monkeypatch, dsr_cli_weights, data, category, max_epochs):
+    """Keep shared batches and epochs after the DSR config while preserving explicit epoch overrides."""
+    import yaml
+
+    mapping = os.path.join(tmp_path, "paths.toml")
+    with open(mapping, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write('[teachers]\ndsr_vq = "' + dsr_cli_weights.replace("\\", "/") + '"\n')
+    monkeypatch.setattr(io_utils, "PATHS_FILE", mapping)
+    with open(os.path.join(CONFIG_DIR, "models", "dsr.yaml"), encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    assert config["model"]["class_path"] == "visionlab.anomaly_detection.models.dsr.lightning_model.DsrLitModel"
+    assert config["model"]["init_args"] == {"latent_anomaly_strength": 0.2, "upsampling_train_ratio": 0.7,
+                                             "visualizer": False}
+    assert config["trainer"] == {"num_sanity_val_steps": 0} and "data" not in config
+    expanded = expand_args(["--data", data, "--model", "dsr"], run=False)
+    configs = [expanded[index + 1] for index, value in enumerate(expanded) if value == "--config"]
+    assert configs == [os.path.join(CONFIG_DIR, "default.yaml"), os.path.join(CONFIG_DIR, "trainer.yaml"),
+                       os.path.join(CONFIG_DIR, "data", f"{data}.yaml"), os.path.join(CONFIG_DIR, "models", "dsr.yaml")]
+    arguments = ["--data", data, "--model", "dsr", "--trainer.num_sanity_val_steps", "2",
+                 "--trainer.default_root_dir", os.path.join(tmp_path, "runs"), "--trainer.accelerator", "cpu",
+                 "--trainer.devices", "1", "--trainer.logger", "false"]
+    if max_epochs is not None:
+        arguments += ["--trainer.max_epochs", str(max_epochs)]
+    cli = LitCLI(args=arguments, run=False)
+    assert cli.trainer.max_epochs == (10 if max_epochs is None else max_epochs)
+    assert cli.trainer.num_sanity_val_steps == cli.config.trainer.num_sanity_val_steps == 0
+    assert cli.datamodule.train_batch_size == cli.datamodule.eval_batch_size == 8
+    assert cli.model.automatic_optimization is False and cli.model.visualizer is None
+    assert cli.model.teacher_weights_path == dsr_cli_weights
+    assert cli.model.pre_processor.mean is cli.model.pre_processor.std is None
+    assert not hasattr(cli.model, "second_phase")
+    assert cli.trainer.default_root_dir.endswith(os.path.join("dsr", f"{data}_{category}", "v0"))
+
+
 @pytest.mark.parametrize("data,category", (("mvtec", "bottle"), ("visa", "candle")))
 @pytest.mark.parametrize("max_epochs", (None, 5))
 def test_ganomaly_config_merging_and_output_name(tmp_path, monkeypatch, data, category, max_epochs):

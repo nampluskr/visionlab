@@ -148,6 +148,9 @@ visionlab/                                      # project root
 │   ├── 16_ganomaly/
 │   │   ├── test_ganomaly.py                    # pure model, original quirks, pad_nextpow2
 │   │   └── test_ganomaly_lightning.py          # FR-6, FR-12, FR-14, two-optimizer manual optimization
+│   ├── 17_dsr/
+│   │   ├── test_dsr.py                         # pure model, three forward modes, anomaly generator
+│   │   └── test_dsr_lightning.py               # FR-6, FR-12, FR-14, D-19, two-stage manual optimization
 │   └── common/                                 # tests that span Phases
 │       ├── test_cli.py                         # FR-13
 │       └── test_dependency.py                  # NFR-1, NFR-2, run for every Phase
@@ -158,7 +161,7 @@ visionlab/                                      # project root
         │   │   ├── default.yaml                # common seed
         │   │   ├── trainer.yaml                # Trainer, logger, callbacks
         │   │   ├── data/                       # mvtec.yaml, visa.yaml
-        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml, ganomaly.yaml
+        │   │   └── models/                     # stfpm.yaml, efficient_ad.yaml, supersimplenet.yaml, draem.yaml, fastflow.yaml, cflow.yaml, uflow.yaml, csflow.yaml, ganomaly.yaml, dsr.yaml
         │   ├── data/
         │   │   ├── common/
         │   │   │   └── split.py                # TestSplitMode, ValSplitMode (D-10)
@@ -194,6 +197,12 @@ visionlab/                                      # project root
         │   │   │   ├── lightning_model.py      # DraemLitModel, native LightningModule
         │   │   │   ├── loss.py                 # DraemLoss (kornia, D-23)
         │   │   │   └── model.py                # DraemModel (was torch_model.py)
+        │   │   ├── dsr/                        # copied from anomalib models/image/dsr (D-18)
+        │   │   │   ├── __init__.py
+        │   │   │   ├── anomaly_generator.py    # DsrAnomalyGenerator
+        │   │   │   ├── lightning_model.py      # DsrLitModel, native LightningModule (two optimizers, stage switch)
+        │   │   │   ├── loss.py                 # DsrSecondStageLoss, DsrThirdStageLoss (kornia, D-23)
+        │   │   │   └── model.py                # DsrModel and submodules (was torch_model.py)
         │   │   ├── efficient_ad/               # copied from anomalib models/image/efficient_ad (D-18)
         │   │   │   ├── __init__.py
         │   │   │   ├── lightning_model.py      # EfficientAdLitModel, native LightningModule
@@ -327,13 +336,13 @@ C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe -m pytest tests\<NN_
 - **배제한 대안**: 1 epoch 적합 모델에도 10 epoch를 강제하는 방식(원본 동작이 바뀐다). native에서만 에폭을 다르게 주는 방식(레퍼런스와 예산이 어긋난다). EfficientAD 모델 yaml에 20 epoch를 적는 방식(처음 시도했고 결정 뒤 제거했다). FRE에 원본의 220 epoch를 그대로 쓰는 방식(시간이 길다. Phase 9에서 처음 정한 뒤 사용자가 철회했다). 임의의 N epoch로 절충하는 방식(근거가 없다). CFLOW에 공유 10 epoch를 그대로 쓰는 방식(학습 시간이 길다, Phase 13).
 - **남은 한계**: FRE는 원본이 고정한 220 epoch가 아니라 10 epoch로 학습한 결과를 비교하므로 원본이 의도한 수렴 상태의 성능은 확인하지 않았다(Phase 9). CFLOW는 원본이 의도한 에폭에서의 성능은 확인하지 않았고 1 epoch 학습의 AUROC만 비교했다(Phase 13).
 
-## D-23. kornia를 순수 모델과 학습 손실의 외부 의존으로 허용한다
+## D-23. kornia를 순수 모델 쪽과 학습 전용 모델 패키지의 loss.py의 외부 의존으로 허용한다
 
-- **선택**: PaDiM의 `GaussianBlur2d`는 원본처럼 kornia(0.8.2)를 import한다. 독립 구현하지 않는다(Phase 3, 사용자 결정 2026-10-25). DRAEM의 `DraemLoss`도 원본처럼 kornia의 `FocalLoss`와 `SSIMLoss`를 import한다(Phase 11, 사용자 결정 2026-10-27).
-- **적용 범위**: kornia에만 해당한다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. kornia는 `src/visionlab`에서 순수 모델 쪽(`model.py`와 `components/`)과 DRAEM의 학습 전용 손실(`models/draem/loss.py`)에만 쓰고, 배포 환경에도 설치되어 있어야 한다. 현재 kornia를 import하는 곳은 `components/filters/blur.py`와 `models/draem/loss.py` 두 파일이다. `loss.py`는 `draem/lightning_model.py`만 import하며 `Predictor`와 export 경로(`draem/model.py`, `utils/io.py`)는 import하지 않는다.
+- **선택**: PaDiM의 `GaussianBlur2d`는 원본처럼 kornia(0.8.2)를 import한다. 독립 구현하지 않는다(Phase 3, 사용자 결정 2026-10-25). DRAEM의 `DraemLoss`도 원본처럼 kornia의 `FocalLoss`와 `SSIMLoss`를 import한다(Phase 11, 사용자 결정 2026-10-27). DSR의 `DsrSecondStageLoss`와 `DsrThirdStageLoss`도 원본처럼 kornia의 `FocalLoss`를 import한다(Phase 17, 사용자 결정 2026-10-28). 앞으로 원본이 kornia로 학습 전용 손실을 계산하는 모델은 학습 전용 모델 패키지의 `loss.py`에서 kornia를 import할 수 있고 새 결정을 만들지 않는다.
+- **적용 범위**: kornia에만 해당한다. 다른 라이브러리는 이 결정에 포함되지 않으며 필요한 Phase에서 따로 정한다. kornia는 `src/visionlab`에서 순수 모델 쪽(`model.py`와 `components/`)과 학습 전용 모델 패키지의 `loss.py`에만 쓰고, 배포 환경에도 설치되어 있어야 한다. 현재 kornia를 import하는 곳은 `components/filters/blur.py`, `models/draem/loss.py`, `models/dsr/loss.py` 세 파일이다. 두 `loss.py`는 각 모델의 `lightning_model.py`(`draem/lightning_model.py`, `dsr/lightning_model.py`)만 import하며, `Predictor`와 export 경로(`draem/model.py`, `dsr/model.py`, 각 `__init__.py`, `utils/io.py`)는 import하지 않는다. `draem/__init__.py`와 `dsr/__init__.py`는 `model.py`의 모델 클래스만 노출한다.
 - **INTENT와의 관계**: INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 긴장 관계에 있다. kornia는 PyTorch 위의 라이브러리이므로 이 결정은 그 범위를 PyTorch 생태계 패키지까지 넓혀 읽는다. INTENT는 고치지 않는다.
-- **근거**: 원본 알고리즘 보존(D-18)과 FR-5 일치 검증의 범위를 줄인다. DRAEM의 손실은 원본이 kornia의 `FocalLoss`와 `SSIMLoss`로 계산하며, 학습 전용이라 추론 경로에 남지 않는다.
-- **배제한 대안**: `GaussianBlur2d`를 순수 torch로 독립 구현하는 방식(검증 대상이 늘고 원본과 어긋날 위험이 있다). `FocalLoss`와 `SSIMLoss`를 독립 구현하는 방식(같은 이유).
+- **근거**: 원본 알고리즘 보존(D-18)과 FR-5 일치 검증의 범위를 줄인다. DRAEM과 DSR의 손실은 원본이 kornia의 `FocalLoss`(DRAEM은 `SSIMLoss`도)로 계산하며, 학습 전용이라 추론 경로에 남지 않는다.
+- **배제한 대안**: `GaussianBlur2d`를 순수 torch로 독립 구현하는 방식(검증 대상이 늘고 원본과 어긋날 위험이 있다). `FocalLoss`와 `SSIMLoss`를 독립 구현하는 방식(같은 이유). 모델마다 허용 위치를 하나씩 더하는 방식(같은 결정을 반복하게 된다).
 
 ## D-24. 레퍼런스 비교는 레퍼런스가 보고하는 값과 같은 정의로 한다
 
