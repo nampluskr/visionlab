@@ -2,7 +2,7 @@
 
 ## 무엇을 하는가
 
-순수 PyTorch만으로 dataset, transform, dataloader, model, inference를 수행할 수 있는 모델과 가중치를 배포한다.
+Lightning과 anomalib 없이 dataset, transform, dataloader, model, inference를 수행할 수 있는 모델과 가중치를 배포한다.
 
 anomalib처럼 이상 탐지에 적용된 통합 학습·평가·추론 프레임워크를 native Lightning으로 구현한다.
 
@@ -12,7 +12,7 @@ anomalib처럼 이상 탐지에 적용된 통합 학습·평가·추론 프레�
 
 1. anomalib의 image 이상 탐지 모델을 로컬 자산으로 그대로 실행해 레퍼런스 성능 수치를 확인한다.
 2. anomalib image 모델을 native Lightning만으로 이식·수정하고, 학습·평가 수치를 1단계와 비교한다.
-3. 2단계에서 학습한 가중치를 순수 PyTorch 모델로 불러와 추론하고, 그 수치를 1단계와 비교한다.
+3. 2단계에서 학습한 가중치를 Lightning 없이 PyTorch 모델로 불러와 추론하고, 그 수치를 1단계와 비교한다.
 
 ## 왜 하는가
 
