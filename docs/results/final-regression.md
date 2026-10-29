@@ -234,3 +234,68 @@ $py = 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe'
 |---|---|---|
 | 2026-10-28 전체 회귀 기록 | 549 | 2 |
 | 정정 합계 (15_csflow를 30 passed로 대체) | 551 | 0 |
+
+## 마감 전 재실행
+
+프로젝트 마감 지시(2026-10-29)에 따라 전체 회귀를 한 번 더 실행했다. 앞의 정정 합계 551 passed가 폴더 재실행을 합친 값이었으므로, 이번에는 20개 폴더를 모두 새로 실행해 한 번에 측정한 값을 얻는 것이 목적이다. 학습, 평가, `compare_outputs`는 돌리지 않았고 pytest만 실행했다. 코드와 테스트는 수정하지 않았다(실행 시점 HEAD는 `ff1db68`이며 앞서 INTENT 문구, `LICENSE`, `NOTICE`, `.gitignore`만 바뀌었다).
+
+### 재실행 명령
+
+다음은 agy에 보낸 명령이다. 첫 승인 창은 `cd`, `$py`, 첫 명령이 한 창에 합쳐져 main이 지시한 명령과 일치함을 직접 읽고 한 번 승인했다(영구 허용은 선택하지 않았다). 나머지 명령은 승인 창 없이 실행되어 교차 확인할 수 없다. agy는 시킨 명령 외에 로그 확인용 명령을 추가로 한 번 실행했으나 승인 창이 뜨지 않았고 읽기 전용으로 보인다(이 문서의 수치는 로그 파일에서 main이 직접 읽었다).
+
+```powershell
+cd D:\projects\visionlab
+$py = 'C:\winpython\WPy64-31180_gpu\python-3.11.8.amd64\python.exe'
+& $py -m pytest tests\00_dataset 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-00_dataset-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\01_stfpm 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-01_stfpm-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\02_efficient_ad 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-02_efficient_ad-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\03_padim 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-03_padim-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\04_dfm 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-04_dfm-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\05_dfkde 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-05_dfkde-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\06_patchcore 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-06_patchcore-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\07_reverse_distillation 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-07_reverse_distillation-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\08_cfa 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-08_cfa-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\09_fre 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-09_fre-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\10_supersimplenet 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-10_supersimplenet-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\11_draem 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-11_draem-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\12_fastflow 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-12_fastflow-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\13_cflow 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-13_cflow-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\14_uflow 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-14_uflow-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\15_csflow 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-15_csflow-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\16_ganomaly 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-16_ganomaly-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\17_dsr 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-17_dsr-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\18_winclip 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-18_winclip-261029-1.log; "exit=$LASTEXITCODE"
+& $py -m pytest tests\common 2>&1 | Tee-Object -FilePath D:\projects\visionlab\outputs\logs\final-regress-common-261029-1.log; "exit=$LASTEXITCODE"
+```
+
+### 재실행 결과
+
+다음은 폴더별 결과다. 소요 시간은 pytest가 보고한 초 단위 값이다. agy의 터미널 출력에서 `exit=0`이 확인되었고 모든 로그의 마지막 줄이 passed였다.
+
+| 폴더 | passed | failed | 소요(초) | 로그 |
+|---|---|---|---|---|
+| `tests\00_dataset` | 10 | 0 | 5.94 | `final-regress-00_dataset-261029-1.log` |
+| `tests\01_stfpm` | 32 | 0 | 66.9 | `final-regress-01_stfpm-261029-1.log` |
+| `tests\02_efficient_ad` | 22 | 0 | 44.61 | `final-regress-02_efficient_ad-261029-1.log` |
+| `tests\03_padim` | 16 | 0 | 32.26 | `final-regress-03_padim-261029-1.log` |
+| `tests\04_dfm` | 22 | 0 | 32.48 | `final-regress-04_dfm-261029-1.log` |
+| `tests\05_dfkde` | 20 | 0 | 32.41 | `final-regress-05_dfkde-261029-1.log` |
+| `tests\06_patchcore` | 24 | 0 | 34.61 | `final-regress-06_patchcore-261029-1.log` |
+| `tests\07_reverse_distillation` | 25 | 0 | 37.09 | `final-regress-07_reverse_distillation-261029-1.log` |
+| `tests\08_cfa` | 35 | 0 | 34.54 | `final-regress-08_cfa-261029-1.log` |
+| `tests\09_fre` | 16 | 0 | 32.45 | `final-regress-09_fre-261029-1.log` |
+| `tests\10_supersimplenet` | 27 | 0 | 39.35 | `final-regress-10_supersimplenet-261029-1.log` |
+| `tests\11_draem` | 39 | 0 | 54.81 | `final-regress-11_draem-261029-1.log` |
+| `tests\12_fastflow` | 25 | 0 | 51.52 | `final-regress-12_fastflow-261029-1.log` |
+| `tests\13_cflow` | 29 | 0 | 54.89 | `final-regress-13_cflow-261029-1.log` |
+| `tests\14_uflow` | 25 | 0 | 51.89 | `final-regress-14_uflow-261029-1.log` |
+| `tests\15_csflow` | 30 | 0 | 74.08 | `final-regress-15_csflow-261029-1.log` |
+| `tests\16_ganomaly` | 30 | 0 | 25.76 | `final-regress-16_ganomaly-261029-1.log` |
+| `tests\17_dsr` | 26 | 0 | 44.39 | `final-regress-17_dsr-261029-1.log` |
+| `tests\18_winclip` | 31 | 0 | 42.14 | `final-regress-18_winclip-261029-1.log` |
+| `tests\common` | 67 | 0 | 84.14 | `final-regress-common-261029-1.log` |
+| 합계 | 551 | 0 | 876.3 | |
+
+### 판정
+
+실패 0이고 합계 551 passed가 실측과 일치한다. 앞의 정정 합계(549 passed에 `15_csflow` 폴더 재실행 30 passed를 합친 551)가 한 번에 측정한 값과 같음을 확인했다. `15_csflow`는 시드 없는 fixture 때문에 통과 여부가 실행마다 달라질 수 있었으나 이번 실행도 30 passed(74.08초)였다. 이 한 번의 통과가 fixture의 비결정성이 사라졌음을 뜻하지는 않는다(`equal_nan=True`로 NaN이 같은 위치일 때 통과하도록 완화한 상태다).
