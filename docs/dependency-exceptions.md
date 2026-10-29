@@ -1,6 +1,6 @@
-# 외부 의존 예외 정리 (초안)
+# 외부 의존과 배포 요구 정리 (초안)
 
-> 상태: INTENT 수정안 A가 반영됨(2026-10-28, `docs/intent-appendix-draft.md`). 부록 A에는 torchmetrics, kornia, scikit-learn, FrEIA(와 numpy, scipy), regex만 올랐다. 2.1절의 timm, torchvision, numpy(단독), tqdm, PIL과 3절에서 확인된 mpmath는 허용 결정 대기다. 이 문서의 5절은 반영 전의 수정안 비교다.
+> 상태: 개정됨(2026-10-29). INTENT (b)안이 반영되어(`docs/cleanup-proposals-draft.md` 3절) 외부 패키지는 INTENT 원칙의 예외가 아니라 `specs/SPEC.md` 부록 A의 배포 요구 목록으로 관리한다. 부록 A에는 timm, torchvision, numpy, PIL, tqdm, mpmath까지 올랐다. 이 문서의 "예외"와 "허용 결정 대기" 표현, 4절의 INTENT 불일치 표, 5절의 수정안 A, B, C 비교는 반영 이전의 기록이며 현재 INTENT, SPEC, DECISIONS의 문구와 다르다.
 
 INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 실제 코드 사이의 간극을 한곳에 모은 초안이다. `specs/`와 INTENT는 고치지 않았고, 이 문서는 결정을 대신하지 않는다. INTENT 수정안은 5절에 있고 선택은 사용자에게 남아 있다. 작성일은 2026-10-28이고 Phase 1~18이 끝난 커밋 `ddee01d` 기준이다.
 
@@ -13,7 +13,7 @@ INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 실�
 
 한계는 다음과 같다. 정적 스캔은 서드파티 패키지가 끌고 오는 간접 의존(예: timm이 요구하는 패키지)을 보지 않는다. 실제 배포 환경에 설치해 import해 본 실험은 하지 않았다. 표의 "필요"는 import 문이 있다는 뜻이고 런타임에 해당 분기가 실행된다는 보증은 아니다.
 
-## 2. 예외 결정 표
+## 2. 외부 의존 결정 표
 
 다음은 요청받은 다섯 결정이다. "추론 경로 잔존"은 export를 읽는 순수 추론(`Predictor`와 각 `model.py`)에서 해당 의존이 import 또는 실행되는지를 뜻한다.
 
@@ -27,7 +27,7 @@ INTENT의 "배포되는 모델은 순수 PyTorch만으로 동작한다"와 실�
 
 D-27은 의존 예외가 아니라 입력 조건의 변경이다. 원본 알고리즘 보존 원칙과의 관계 때문에 같은 표에 두었다. D-28의 순수 `encode_image` 앞 resize(입력이 CLIP 이미지 크기와 다를 때만 bicubic)도 같은 종류의 조건 변경이며 D-28에 함께 적혀 있다.
 
-### 2.1 결정 없이 쓰이거나 다른 결정에 속한 의존
+### 2.1 별도 결정 없이 쓰이는 의존 (부록 A 등재 완료)
 
 위 다섯 결정에 들어 있지 않은 외부 패키지가 추론 경로에 남아 있다. specs에서 아래 항목의 허용 결정을 찾은 것은 torchmetrics(D-20)뿐이다.
 

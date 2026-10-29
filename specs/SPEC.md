@@ -41,7 +41,7 @@
 | NFR-4 | 실행마다 최종 설정·분할 목록·가중치 해시·seed·checkpoint 식별 정보를 저장한다 | 실행 산출물에 해당 파일 존재 |
 | NFR-5 | 이식한 파일은 원본 저작권·SPDX 표기를 유지한다 | 이식 파일 헤더 grep |
 | NFR-6 | `tests/`의 테스트는 pytest로 작성하고 실행한다. `unittest`를 쓰지 않는다(D-21) | `tests/`의 `unittest` import 0건, `python.exe -m pytest tests\...` 실행 성공. import 차단 테스트는 subprocess로 확인 |
-| NFR-7 | 추론 경로(각 `model.py`, `models/components/`, 순수 `common/` 파일, `inference/`)는 torch와 부록 A의 허용 목록에 있는 외부 패키지만 import한다. 지연 import로 허용한 곳은 부록 A에 적은 파일과 함수뿐이다 | `tests/common/test_dependency.py`가 허용 목록 밖의 import를 차단한다. 현재 이 테스트는 anomalib, open_clip, ftfy, scikit-learn, regex, lightning만 검사하며, 허용 목록 전체를 검사하도록 넓히는 일은 부록 A 확정 뒤 별도로 한다 |
+| NFR-7 | 추론 경로(각 `model.py`, `models/components/`, 순수 `common/` 파일, `inference/`)가 import하는 외부 패키지는 부록 A(배포 요구 목록)에 있어야 한다. 지연 import로 두는 곳은 부록 A에 적은 파일과 함수뿐이다 | `tests/common/test_dependency.py`가 허용 목록 밖의 import를 차단한다. 현재 이 테스트는 anomalib, open_clip, ftfy, scikit-learn, regex, lightning만 검사하며, 허용 목록 전체를 검사하도록 넓히는 일은 부록 A 확정 뒤 별도로 한다 |
 
 ## 3. 제약사항
 
@@ -60,16 +60,38 @@
 - **X-7**: TensorBoard·W&B 로거.
 - **X-8**: 분산 실행 검증.
 
-## 부록 A. 추론 경로 외부 패키지 허용 목록
+## 부록 A. 추론 경로 외부 패키지 배포 요구 목록
 
-NFR-7이 가리키는 허용 목록이다. 각 항목의 근거는 `DECISIONS.md`의 해당 결정이며, 사용자가 허용을 결정한 패키지만 올린다(INTENT 2026-10-28 승인). 다음은 허용 목록이다.
+NFR-7이 가리키는 배포 요구 목록이다. 배포 환경에서 제외되는 것은 Lightning과 anomalib뿐이며(INTENT), 추론 경로가 import하는 그 밖의 외부 패키지는 배포 환경에 설치되고 이 목록에 근거와 함께 적는다. 앞 다섯 행의 근거는 `DECISIONS.md`의 해당 결정이고, 뒤 여섯 행은 별도 결정 없이 코드에서 확인한 사용 위치가 근거다(2026-10-29 코드 스캔). 다음은 배포 요구 목록이다.
 
-| 패키지 | 허용 근거 | 허용 위치 | 추론 경로 |
+| 패키지 | 근거 | 사용 위치 | 추론 경로 |
 |---|---|---|---|
 | torchmetrics | D-20 | `common/metric.py`, `common/post_processor.py` | 남음 |
 | kornia | D-23 | `models/components/filters/blur.py`(추론), `models/draem/loss.py`, `models/dsr/loss.py`(학습 전용) | `blur.py`만 남음 |
 | scikit-learn | D-25 | `models/components/dimensionality_reduction/random_projection.py`, `models/cfa/model.py`의 `initialize_centroid`(함수 안 지연 import) | 남지 않음 |
 | FrEIA(와 numpy, scipy) | D-26 | FastFlow, CFLOW, UFlow, CSFlow 모델 파일과 `models/components/flow/all_in_one_block.py` | 남음 |
 | regex | D-28 | `models/winclip/tokenizer.py`의 `SimpleTokenizer.__init__`(지연 import) | 남지 않음 |
+| timm | 코드 사용 위치 | `models/components/feature_extractors/timm.py`, `models/fastflow/model.py`, `models/uflow/feature_extraction.py` | 남음 |
+| torchvision | 코드 사용 위치 | `common/pre_processor.py`(추론), `models/components/feature_extractors/timm.py`, `models/cfa/model.py`, `models/csflow/model.py`, `models/reverse_distillation/components/`(추론). 학습·데이터 전용: `common/perlin.py`, `common/multi_random_choice.py`, `models/dsr/anomaly_generator.py`, `models/supersimplenet/loss.py`, `models/efficient_ad/`, `data/common/base_dataset.py` | 남음 |
+| numpy(FrEIA 요구 외 단독 사용) | 코드 사용 위치 | `models/csflow/model.py`(순열 재생성), `models/cflow/utils.py`, `models/efficient_ad/model.py`, `models/components/dimensionality_reduction/random_projection.py`, `models/uflow/anomaly_map.py`, `common/visualizer.py` | 남음 |
+| PIL | 코드 사용 위치 | `data/common/base_dataset.py`, `common/visualizer.py`, `common/lightning_visualizer.py` | 남지 않음(`Predictor`가 import하지 않음) |
+| tqdm | 코드 사용 위치 | `models/cfa/model.py`, `models/components/sampling/k_center_greedy.py`(최상단 import), `models/efficient_ad/lightning_model.py`(학습 전용) | import는 남지만 추론 런타임에는 쓰이지 않음 |
+| mpmath | 코드 사용 위치 | `models/uflow/anomaly_map.py`(최상단 import, 선택 기능 `binomial_test`에서만 사용) | import는 남지만 `forward`에서는 쓰이지 않음 |
 
-timm, torchvision, numpy(FrEIA의 요구 사항이 아닌 단독 사용), tqdm, PIL, mpmath는 코드에서 추론 경로에 import되지만 허용 결정이 없어 이 목록에 올리지 않았다. 허용 여부는 사용자 결정을 기다린다(`docs/dependency-exceptions.md` 2.1절).
+다음은 위 패키지의 확인한 설치 버전과 설치 메타데이터상 간접 의존이다. 이 개발 환경(`C:\winpython\WPy64-31180_gpu`)의 `importlib.metadata`로 확인한 값이며 배포 환경이 같다는 보장이나 실제 설치 실험은 아니다. 배포 환경의 버전 범위는 정해지지 않았다.
+
+| 패키지 | 확인한 설치 버전 | 간접 의존(설치 메타데이터) |
+|---|---|---|
+| torch | 2.5.1+cu121 | sympy(그 아래 mpmath), networkx, jinja2, filelock, fsspec, typing-extensions |
+| torchvision | 0.20.1+cu121 | numpy, pillow |
+| timm | 1.0.22 | huggingface-hub, PyYAML, safetensors |
+| torchmetrics | 1.8.2 | numpy, packaging, lightning-utilities |
+| kornia | 0.8.2 | kornia_rs, packaging |
+| FrEIA | 0.2 | numpy, scipy |
+| scipy | 1.15.3 | numpy. torchvision과 timm의 요구 사항에는 없다 |
+| numpy | 2.2.5 | 없음 |
+| scikit-learn | 1.7.2 | numpy, scipy, joblib, threadpoolctl |
+| regex | 2026.7.19 | 없음 |
+| tqdm | 4.70.0 | colorama(Windows) |
+| mpmath | 1.3.0 | 없음 |
+| PIL(Pillow) | 11.3.0 | 없음 |

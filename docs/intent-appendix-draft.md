@@ -1,6 +1,6 @@
-# INTENT 안 A 적용 초안 (예외 부록)
+# INTENT 안 A 적용 초안 (예외 부록, 안 A 시점의 기록)
 
-> 상태: 반영됨(2026-10-28). 1절 문장은 `specs/INTENT.md`에, NFR-7과 부록 A는 `specs/SPEC.md`에, 4.1절은 `specs/DECISIONS.md`의 D-23, D-25, D-26, D-28에, 4.2절은 `AGENTS.md`에 반영했다. 3절의 결정 필요 항목(timm, torchvision, numpy 단독, tqdm, PIL, mpmath)은 부록 A에 올리지 않았고 허용 결정 대기다. 4.3절(`test_dependency.py` 확장)과 5절 5, 6단계는 반영하지 않았다.
+> 상태: 개정됨(2026-10-29). 2026-10-28에 반영한 안 A의 문구는 (b)안으로 교체됐다(`docs/cleanup-proposals-draft.md` 3.3, 3.4절). `specs/INTENT.md`의 원칙 두 항목과 "왜 하는가"는 새 문구이고, `specs/SPEC.md`의 NFR-7과 부록 A는 "배포 요구 목록"이며, D-23, D-25, D-26, D-28과 `AGENTS.md`도 고쳤다. 아래 본문은 안 A 시점의 초안(예외 부록 틀)이며 현재 문구와 다르다.
 
 사용자가 INTENT 수정안 중 안 A(원칙은 유지하고 예외를 부록으로 둔다)를 채택했다(`docs/dependency-exceptions.md` 5.1절). 이 문서는 적용 전 초안이다. INTENT, `specs/`, `AGENTS.md`는 아직 고치지 않았고, 사용자가 문구를 확인한 뒤에 고친다. 작성일은 2026-10-28이다.
 

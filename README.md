@@ -3,8 +3,8 @@
 ## 개요
 
 anomalib 같은 통합 학습·평가·추론 프레임워크를 native Lightning으로 직접 구현하고, 학습한 모델과
-가중치를 순수 PyTorch만으로 배포하는 프로젝트다. 배포 환경에는 anomalib과 Lightning이 없고 PyTorch만
-쓸 수 있기 때문이다.
+가중치를 순수 PyTorch만으로 배포하는 프로젝트다. 배포 환경에는 anomalib과 Lightning이 없기 때문이다.
+그 밖에 모델이 필요로 하는 패키지는 배포 환경에 설치하며 그 목록은 `specs/SPEC.md` 부록 A에 있다.
 
 대상 task는 anomaly detection(MVTec AD·VisA)이다. 이후 classification, segmentation, object detection 등 다른
 vision task로 넓힌다. 구현 결과는 anomalib 2.0.0을 설치한 환경에서 같은 데이터·학습 예산으로 실행해

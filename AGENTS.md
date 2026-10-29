@@ -108,7 +108,7 @@ visionlab에서 새로 작성하는 Python 코드(의존성 대체 부품, 실�
 이 프로젝트의 고유 제약은 다음과 같다.
 
 - visionlab 코드는 anomalib을 import·상속하지 않는다. anomalib은 `evaluation/anomalib/`의 레퍼런스 실행과 비교·검증에만 쓴다. `evaluation/visionlab/`도 anomalib을 import하지 않는다 (INTENT, D-15).
-- 배포 모델은 순수 PyTorch만으로 동작한다. 예외는 `specs/SPEC.md` 부록 A의 허용 목록에 있는 외부 패키지뿐이다 (INTENT, D-4, NFR-7).
+- 배포 모델은 Lightning과 anomalib 없이 동작한다. 추론 경로의 외부 패키지는 `specs/SPEC.md` 부록 A의 요구 목록에 있는 것뿐이다 (INTENT, D-4, NFR-7).
 - 생성자 인자의 이름·순서·기본값을 anomalib 2.0.0과 맞춘다 (D-5).
 - AUROC, F1 등 metric은 torchmetrics로 계산한다. 직접 구현하지 않고 scikit-learn도 쓰지 않는다(D-20).
 - 필요한 것만 만든다. 빈 폴더나 미리 만든 추상화를 두지 않는다. 파일 배치는 D-15를 따른다.
