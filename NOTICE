@@ -1,0 +1,29 @@
+visionlab
+Copyright [저작권자 확인 필요]
+
+This project is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project is a port of anomalib 2.0.0 image models to native Lightning and to
+a Lightning-free PyTorch inference path. Much of the source code under
+src/visionlab is adapted from anomalib.
+
+anomalib
+  Copyright (C) 2020-2025 Intel Corporation
+  Licensed under the Apache License, Version 2.0
+  https://github.com/open-edge-platform/anomalib
+  The anomalib 2.0.0 distribution does not ship a NOTICE file. Adapted files keep
+  their original copyright and SPDX-License-Identifier lines. Some adapted files
+  carry SPDX-License-Identifier: MIT as set by anomalib, and keep it. Files that
+  were modified in this port are not individually marked as changed.
+
+open_clip and OpenAI CLIP (MIT)
+  The independent CLIP implementation in
+  src/visionlab/anomaly_detection/models/winclip/clip.py and tokenizer.py is
+  derived from open_clip. The BPE vocabulary file
+  src/visionlab/anomaly_detection/models/winclip/bpe_simple_vocab_16e6.txt.gz was
+  created by OpenAI CLIP and copied byte for byte from the open_clip 2.24.0
+  distribution. The copyright notices and the MIT permission text are in
+  src/visionlab/anomaly_detection/models/winclip/LICENSE.
+
+Datasets and pretrained weights are not part of this repository and are subject
+to their own licenses.
