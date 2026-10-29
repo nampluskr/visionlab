@@ -15,6 +15,7 @@ from visionlab.anomaly_detection.common.pre_processor import IMAGENET_MEAN, IMAG
 from visionlab.utils import io as io_utils
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Equal scores in the validation set make PostProcessor normalization 0/0, so NaN appears at the same positions; see docs/results/final-regression.md (csflow diagnosis).
 OUTPUT_NAMES = ("pred_score", "anomaly_map", "normalized_pred_score", "normalized_anomaly_map", "pred_label", "pred_mask")
 
 
@@ -269,7 +270,7 @@ def test_csflow_native_checkpoint_and_frozen_evaluation(fitted_csflow, tmp_path,
         expected, actual = model.predict_step(batch, 0), restored.predict_step(batch, 0)
     assert actual["pred_score"].shape == (1,) and actual["anomaly_map"].shape == (1, 1, 256, 256)
     for name in OUTPUT_NAMES:
-        torch.testing.assert_close(actual[name], expected[name], rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(actual[name], expected[name], rtol=1e-5, atol=1e-6, equal_nan=True)
     before = restored.post_processor.state_dict()
 
     def forbidden(*args, **kwargs):
@@ -298,7 +299,7 @@ def test_csflow_native_checkpoint_and_frozen_evaluation(fitted_csflow, tmp_path,
         for name in ("pred_score", "anomaly_map"):
             torch.testing.assert_close(observed[stage][name], expected[name], rtol=1e-5, atol=1e-6)
     for name in OUTPUT_NAMES:
-        torch.testing.assert_close(observed["test"][name], expected[name], rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(observed["test"][name], expected[name], rtol=1e-5, atol=1e-6, equal_nan=True)
     for name, value in restored.post_processor.state_dict().items():
         torch.testing.assert_close(value, before[name], equal_nan=True)
 
@@ -338,7 +339,7 @@ def consume_csflow_export(root):
         assert actual["pred_score"].shape == (len(batch["images"]),)
         assert actual["anomaly_map"].shape == (len(batch["images"]), 1, 256, 256)
         for name in OUTPUT_NAMES:
-            torch.testing.assert_close(actual[name], batch["outputs"][name], rtol=1e-5, atol=1e-6)
+            torch.testing.assert_close(actual[name], batch["outputs"][name], rtol=1e-5, atol=1e-6, equal_nan=True)
 
 
 def test_csflow_native_isolated_export(fitted_csflow):
