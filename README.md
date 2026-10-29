@@ -125,16 +125,14 @@ run에서 읽는다. 결과는 run 폴더의 `predict/metrics.json`에 저장된
 & $py -m pytest tests\common
 ```
 
-18개 Phase 폴더(`00_dataset`~`18_winclip`)와 `common`을 폴더별로 실행한 마지막 전체 회귀는 549 passed, 2 failed였다
-(`docs/results/final-regression.md`).
+18개 Phase 폴더(`00_dataset`~`18_winclip`)와 `common`을 폴더별로 실행한 마지막 전체 회귀(2026-10-28)는 549 passed,
+2 failed였다. 실패한 `tests\15_csflow`의 2건은 테스트 비교에 `equal_nan=True`를 적용한 뒤 그 폴더만 3회 다시 실행해
+모두 30 passed였다. 전체 회귀를 다시 돌린 것은 아니며 합계는 551 passed로 정정했다(`docs/results/final-regression.md`).
 
 ## 알려진 한계
 
 현재 알려진 한계는 다음과 같다.
 
-- `tests\15_csflow`의 2개 테스트(`test_csflow_native_checkpoint_and_frozen_evaluation`,
-  `test_csflow_native_isolated_export`)가 NaN 비교로 실패한다. 두 번 실행해 모두 재현했고 원인은 확정하지 못했다
-  (`docs/results/final-regression.md`).
 - WinCLIP의 few-shot 경로(`k_shot > 0`)는 이식만 하고 실행하지 않았다. `few_shot_source`와
   `apply_transform=True`는 `NotImplementedError`다.
 - 모델 파일이 외부 패키지를 import하지 않는 모델도 `Predictor`로 읽을 때는 PreProcessor(torchvision)와
